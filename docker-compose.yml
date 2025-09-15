@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # MCP 서버 서비스
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: 3gpp_analysis_mcp
+    ports:
+      - "8000:8000"  # MCP 서버 포트 (필요시 조정)
+    environment:
+      # LLM 설정
+      - LLM_ENDPOINTS=http://localhost:10000,http://localhost:8888
+      - LLM_MODEL=Gemma-3-27B
+
+      # 데이터베이스 설정 (예시 - 실제 환경에 맞게 수정 필요)
+      - DB_HOST=localhost
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=pass
+      - DB_NAME=netperf
+
+      # 백엔드 설정
+      - BACKEND_ANALYSIS_URL=http://localhost:8001/api/analysis/results/
+
+      # 타임존 설정
+      - DEFAULT_TZ_OFFSET=+09:00
+
+      # Python 설정
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+
+    volumes:
+      # 로그 파일 저장을 위한 볼륨 (선택사항)
+      - ./logs:/app/logs
+      # 출력 파일 저장을 위한 볼륨
+      - ./analysis_output:/app/analysis_output
+
+    restart: unless-stopped
+
+    # 헬스체크 (선택사항)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import fastmcp; print('MCP server is running')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # 리소스 제한 (선택사항)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # PostgreSQL 데이터베이스 (선택사항 - 실제 사용시 활성화)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: 3gpp_postgres
+  #   environment:
+  #     - POSTGRES_DB=netperf
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=pass
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #     - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+  #   restart: unless-stopped
+
+  # Redis 캐시 (선택사항 - LLM 응답 캐싱용)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: 3gpp_redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+
+# 볼륨 정의 (선택사항)
+# volumes:
+#   postgres_data:
+#   redis_data:
+
+# 네트워크 정의 (선택사항)
+# networks:
+#   default:
+#     driver: bridge
