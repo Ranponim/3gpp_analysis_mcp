@@ -1,0 +1,12 @@
+# Core dependencies for 3GPP Cell Performance LLM Analyzer
+fastmcp>=0.9.0
+pandas>=1.5.0
+matplotlib>=3.5.0
+psycopg2-binary>=2.9.0
+requests>=2.28.0
+numpy>=1.21.0
+
+# Development dependencies (optional)
+pytest>=7.0.0
+black>=22.0.0
+flake8>=4.0.0
