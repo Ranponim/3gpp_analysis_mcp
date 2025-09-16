@@ -59,7 +59,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/analisys-mcp
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/3gpp_analysis_mcp
           tags: |
             type=semver,pattern={{version}},value=${{ steps.get_version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.get_version.outputs.version }}
@@ -70,6 +70,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
