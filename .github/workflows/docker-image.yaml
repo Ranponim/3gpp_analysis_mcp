@@ -1,35 +1,75 @@
 # 워크플로우의 이름
-name: Publish and Cleanup Docker Hub Images
+name: Publish Docker image to Docker Hub
 
-# 워크플로우 실행 조건: 새 릴리즈가 발행될 때
+# 워크플로우 실행 조건
 on:
+  # 1. 새로운 릴리스가 생성될 때
   release:
-    types: [published]
+    types: [created]
+  # 2. 수동으로 실행할 수 있도록 'workflow_dispatch' 추가
+  workflow_dispatch:
 
+# 실행될 작업(job) 목록
 jobs:
-  build-push-cleanup:
-    # 실행 환경 지정
+  build-and-push:
+    # 작업이 실행될 환경
     runs-on: ubuntu-latest
-
+    
+    # 작업의 단계(step)들
     steps:
       # 1. 소스 코드 체크아웃
-      - name: Checkout repository
+      - name: Check out the repo
         uses: actions/checkout@v4
 
-      # 2. Docker Hub 로그인
+      # 2. 사용할 릴리스 버전 결정 (신규 추가된 단계)
+      #    - 트리거가 'release'이면 해당 릴리스 태그를 사용
+      #    - 트리거가 'workflow_dispatch'(수동 실행)이면 GitHub API로 마지막 릴리스 태그를 조회하여 사용
+      - name: Determine release version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION=${{ github.event.release.tag_name }}
+          else
+            echo "Manual run detected. Fetching latest release tag from GitHub API..."
+            VERSION=$(curl -sL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
+          fi
+          
+          if [ -z "$VERSION" ] || [ "$VERSION" == "null" ]; then
+            echo "Error: Could not determine a release version. Make sure at least one release exists."
+            exit 1
+          fi
+          
+          echo "Using release version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # 3. Docker Hub 로그인
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 3. Docker 이미지 빌드 및 푸시 (릴리즈 태그, latest 태그)
+      # 4. Docker 이미지 태그 및 레이블 메타데이터 추출
+      #    - 'get_version' 단계에서 결정된 버전을 기반으로 태그를 생성하도록 수정
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/analisys-mcp
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.get_version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.get_version.outputs.version }}
+            type=raw,value=latest
+
+      # 5. Docker 이미지 빌드 및 Docker Hub에 푸시
       - name: Build and push Docker image
-        id: build-and-push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ github.ref_name }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

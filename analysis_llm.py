@@ -1292,5 +1292,5 @@ if __name__ == '__main__':
             print(json.dumps(error_result, ensure_ascii=False))
             sys.exit(1)
     else:
-        logging.info("stdio 모드로 MCP를 실행합니다.")
-        mcp.run(transport="stdio")
+        logging.info("streamable-http 모드로 MCP를 실행합니다.")
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=8001)

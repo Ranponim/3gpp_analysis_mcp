@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Don't perform LF normalization on specific files
+Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+.github/workflows/* text eol=lf
