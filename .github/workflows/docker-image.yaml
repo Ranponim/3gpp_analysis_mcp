@@ -14,14 +14,14 @@ jobs:
   build-and-push:
     # 작업이 실행될 환경
     runs-on: ubuntu-latest
-    
+
     # 작업의 단계(step)들
     steps:
       # 1. 소스 코드 체크아웃
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      # 2. 사용할 릴리스 버전 결정 (신규 추가된 단계)
+      # 2. 사용할 릴리스 버전 결정
       #    - 트리거가 'release'이면 해당 릴리스 태그를 사용
       #    - 트리거가 'workflow_dispatch'(수동 실행)이면 GitHub API로 마지막 릴리스 태그를 조회하여 사용
       - name: Determine release version
@@ -37,14 +37,18 @@ jobs:
               -H "X-GitHub-Api-Version: 2022-11-28" \
               https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
           fi
-          
+
           if [ -z "$VERSION" ] || [ "$VERSION" == "null" ]; then
             echo "Error: Could not determine a release version. Make sure at least one release exists."
             exit 1
           fi
-          
+
           echo "Using release version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # ⭐️ [추가] 디버깅을 위해 파일 목록 확인
+      - name: List files in the repository
+        run: ls -la
 
       # 3. Docker Hub 로그인
       - name: Log in to Docker Hub
