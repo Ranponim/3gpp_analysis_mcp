@@ -21,6 +21,7 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'release' && github.event.release.target_commitish || 'main' }}
           fetch-depth: 0  # 전체 히스토리 가져오기
 
       # ⭐️ [추가] 디버깅을 위해 파일 목록 확인
@@ -28,17 +29,26 @@ jobs:
         run: |
           echo "=== Current working directory ==="
           pwd
+          echo "=== Git branch and commit info ==="
+          git branch -a
+          git log --oneline -5
           echo "=== Files in root directory ==="
           ls -la
-          echo "=== Files in .github/workflows ==="
-          ls -la .github/workflows/
-          echo "=== Check if Dockerfile exists ==="
+          echo "=== Check if Dockerfile exists and its size ==="
           if [ -f "Dockerfile" ]; then
             echo "✅ Dockerfile found!"
+            echo "Dockerfile size: $(wc -c < Dockerfile) bytes"
+            echo "Dockerfile lines: $(wc -l < Dockerfile) lines"
+            echo "=== First 10 lines of Dockerfile ==="
             head -10 Dockerfile
+            echo "=== Last 5 lines of Dockerfile ==="
+            tail -5 Dockerfile
           else
             echo "❌ Dockerfile not found!"
+            echo "=== Searching for Dockerfile ==="
             find . -name "Dockerfile" -type f
+            echo "=== All files with 'docker' in name ==="
+            find . -name "*docker*" -type f
           fi
 
       # 2. 사용할 릴리스 버전 결정
