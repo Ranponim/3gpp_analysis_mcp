@@ -8,21 +8,21 @@ services:
       dockerfile: Dockerfile
     container_name: 3gpp_analysis_mcp
     ports:
-      - "8000:8000"  # MCP 서버 포트 (필요시 조정)
+      - "8001:8001"  # MCP 서버 포트 (streamable-http 모드용)
     environment:
-      # LLM 설정
-      - LLM_ENDPOINTS=http://localhost:10000,http://localhost:8888
+      # LLM 설정 (실제 LLM 서버 주소로 변경 필요)
+      - LLM_ENDPOINTS=http://10.251.204.93:10000,http://100.105.188.117:8888
       - LLM_MODEL=Gemma-3-27B
 
-      # 데이터베이스 설정 (예시 - 실제 환경에 맞게 수정 필요)
-      - DB_HOST=localhost
+      # 데이터베이스 설정 (실제 DB 주소로 변경 필요)
+      - DB_HOST=165.213.69.30
       - DB_PORT=5432
-      - DB_USER=postgres
-      - DB_PASSWORD=pass
-      - DB_NAME=netperf
+      - DB_USER=testuser
+      - DB_PASSWORD=1234qwer
+      - DB_NAME=summary
 
-      # 백엔드 설정
-      - BACKEND_ANALYSIS_URL=http://localhost:8001/api/analysis/results/
+      # 백엔드 설정 (호스트 IP 사용)
+      - BACKEND_ANALYSIS_URL=http://165.213.69.30:8000/api/analysis/results/
 
       # 타임존 설정
       - DEFAULT_TZ_OFFSET=+09:00
