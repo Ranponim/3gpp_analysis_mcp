@@ -1,0 +1,574 @@
+"""
+Database Repository Interface and PostgreSQL Implementation
+
+이 모듈은 데이터베이스 액세스를 위한 Repository 패턴을 구현합니다.
+추상 인터페이스와 PostgreSQL 구체 구현을 제공합니다.
+
+기존 main.py의 데이터베이스 연결 및 쿼리 로직을 모듈화한 것입니다.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+# 임시로 절대 import 사용 (나중에 패키지 구조 정리 시 수정)
+import sys
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
+
+# 프로젝트 루트를 sys.path에 추가
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# config 모듈 지연 import
+_config_get_settings = None
+
+
+def get_config_settings():
+    """Configuration Manager에서 설정 가져오기 (지연 로딩)"""
+    global _config_get_settings
+    if _config_get_settings is None:
+        from config import get_settings
+
+        _config_get_settings = get_settings
+    return _config_get_settings()
+
+
+from exceptions import DatabaseError
+
+# 로깅 설정
+logger = logging.getLogger(__name__)
+
+
+class DatabaseRepository(ABC):
+    """
+    데이터베이스 Repository 추상 기본 클래스
+
+    데이터베이스 액세스를 위한 공통 인터페이스를 정의합니다.
+    구체적인 데이터베이스 구현체들은 이 인터페이스를 구현해야 합니다.
+
+    주요 기능:
+    1. 연결 관리 (connect, disconnect)
+    2. 데이터 조회 (fetch_data)
+    3. 쿼리 실행 (execute_query)
+    4. 동적 쿼리 생성 지원
+    """
+
+    @abstractmethod
+    def connect(self) -> None:
+        """
+        데이터베이스 연결 설정
+
+        Raises:
+            DatabaseError: 연결 실패 시
+        """
+
+    @abstractmethod
+    def disconnect(self) -> None:
+        """
+        데이터베이스 연결 해제
+
+        Raises:
+            DatabaseError: 연결 해제 실패 시
+        """
+
+    @abstractmethod
+    def fetch_data(
+        self,
+        query: str,
+        params: Optional[Dict[str, Any]] = None,
+        table_name: Optional[str] = None,
+        columns: Optional[List[str]] = None,
+        time_range: Optional[Tuple[datetime, datetime]] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        데이터 조회 (SELECT 쿼리)
+
+        Args:
+            query (str): 실행할 SQL 쿼리
+            params (Optional[Dict[str, Any]]): 쿼리 매개변수
+            table_name (Optional[str]): 동적 테이블명 (쿼리에 {table} 플레이스홀더 사용 시)
+            columns (Optional[List[str]]): 동적 컬럼명 (쿼리에 {columns} 플레이스홀더 사용 시)
+            time_range (Optional[Tuple[datetime, datetime]]): 시간 범위 필터
+            limit (Optional[int]): 결과 개수 제한
+
+        Returns:
+            List[Dict[str, Any]]: 조회 결과 (딕셔너리 리스트)
+
+        Raises:
+            DatabaseError: 쿼리 실행 실패 시
+        """
+
+    @abstractmethod
+    def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None, commit: bool = True) -> int:
+        """
+        쿼리 실행 (INSERT, UPDATE, DELETE)
+
+        Args:
+            query (str): 실행할 SQL 쿼리
+            params (Optional[Dict[str, Any]]): 쿼리 매개변수
+            commit (bool): 트랜잭션 커밋 여부
+
+        Returns:
+            int: 영향받은 행 수
+
+        Raises:
+            DatabaseError: 쿼리 실행 실패 시
+        """
+
+    @abstractmethod
+    def test_connection(self) -> bool:
+        """
+        연결 테스트
+
+        Returns:
+            bool: 연결 성공 여부
+        """
+
+    def build_dynamic_query(
+        self,
+        base_query: str,
+        table_name: Optional[str] = None,
+        columns: Optional[List[str]] = None,
+        time_range: Optional[Tuple[datetime, datetime]] = None,
+        additional_conditions: Optional[List[str]] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        동적 쿼리 생성 (공통 유틸리티)
+
+        Args:
+            base_query (str): 기본 쿼리 템플릿
+            table_name (Optional[str]): 테이블명
+            columns (Optional[List[str]]): 컬럼 목록
+            time_range (Optional[Tuple[datetime, datetime]]): 시간 범위
+            additional_conditions (Optional[List[str]]): 추가 조건들
+
+        Returns:
+            Tuple[str, Dict[str, Any]]: (완성된 쿼리, 매개변수)
+        """
+        params = {}
+
+        # 테이블명 치환
+        if table_name and "{table}" in base_query:
+            # SQL 인젝션 방지를 위한 기본 검증
+            if not table_name.replace("_", "").replace("-", "").isalnum():
+                raise DatabaseError("유효하지 않은 테이블명", details={"table_name": table_name})
+            base_query = base_query.replace("{table}", table_name)
+
+        # 컬럼명 치환
+        if columns and "{columns}" in base_query:
+            # SQL 인젝션 방지를 위한 기본 검증
+            for col in columns:
+                if not col.replace("_", "").replace("-", "").isalnum():
+                    raise DatabaseError("유효하지 않은 컬럼명", details={"column": col})
+            columns_str = ", ".join(columns)
+            base_query = base_query.replace("{columns}", columns_str)
+
+        # 시간 범위 조건 추가
+        conditions = []
+        if time_range:
+            start_time, end_time = time_range
+            conditions.append("timestamp BETWEEN %(start_time)s AND %(end_time)s")
+            params["start_time"] = start_time
+            params["end_time"] = end_time
+
+        # 추가 조건들
+        if additional_conditions:
+            conditions.extend(additional_conditions)
+
+        # WHERE 절 추가
+        if conditions:
+            if "WHERE" in base_query.upper():
+                base_query += " AND " + " AND ".join(conditions)
+            else:
+                base_query += " WHERE " + " AND ".join(conditions)
+
+        logger.debug("동적 쿼리 생성: %s (매개변수: %d개)", base_query, len(params))
+        return base_query, params
+
+
+class PostgreSQLRepository(DatabaseRepository):
+    """
+    PostgreSQL 데이터베이스 Repository 구현체
+
+    psycopg2를 사용하여 PostgreSQL 데이터베이스에 액세스합니다.
+    연결 풀링, 오류 처리, 리소스 관리를 포함합니다.
+
+    기존 main.py의 PostgreSQL 연결 로직을 모듈화한 것입니다.
+    """
+
+    def __init__(self, config_override: Optional[Dict[str, Any]] = None):
+        """
+        PostgreSQLRepository 초기화
+
+        Args:
+            config_override (Optional[Dict[str, Any]]): 설정 오버라이드 (테스트용)
+        """
+        # Configuration Manager에서 설정 로드
+        try:
+            settings = get_config_settings()
+            self.config = {
+                "host": settings.db_host,
+                "port": settings.db_port,
+                "database": settings.db_name,
+                "user": settings.db_user,
+                "password": settings.db_password.get_secret_value(),
+                "pool_size": settings.db_pool_size,
+            }
+            logger.info("Configuration Manager에서 DB 설정 로드 완료")
+        except Exception as e:
+            logger.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
+            self.config = {
+                "host": os.getenv("DB_HOST", "localhost"),
+                "port": int(os.getenv("DB_PORT", "5432")),
+                "database": os.getenv("DB_NAME", "postgres"),
+                "user": os.getenv("DB_USER", "postgres"),
+                "password": os.getenv("DB_PASSWORD", ""),
+                "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
+            }
+
+        # 설정 오버라이드 적용 (테스트용)
+        if config_override:
+            self.config.update(config_override)
+            logger.debug("DB 설정 오버라이드 적용: %s", list(config_override.keys()))
+
+        # 연결 풀 초기화 (지연 로딩)
+        self._pool = None
+        self._is_connected = False
+
+        logger.info(
+            "PostgreSQLRepository 초기화 완료: host=%s, database=%s", self.config["host"], self.config["database"]
+        )
+
+    def connect(self) -> None:
+        """데이터베이스 연결 풀 초기화"""
+        if self._is_connected:
+            logger.debug("이미 연결된 상태입니다")
+            return
+
+        try:
+            # 연결 풀 생성
+            self._pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=1,
+                maxconn=self.config["pool_size"],
+                host=self.config["host"],
+                port=self.config["port"],
+                database=self.config["database"],
+                user=self.config["user"],
+                password=self.config["password"],
+            )
+
+            self._is_connected = True
+            logger.info(
+                "PostgreSQL 연결 풀 생성 완료: host=%s, pool_size=%d", self.config["host"], self.config["pool_size"]
+            )
+
+        except psycopg2.Error as e:
+            raise DatabaseError(
+                "PostgreSQL 연결 실패",
+                details={"host": self.config["host"], "database": self.config["database"], "error": str(e)},
+            ) from e
+
+    def disconnect(self) -> None:
+        """데이터베이스 연결 풀 해제"""
+        if not self._is_connected or not self._pool:
+            logger.debug("연결되지 않은 상태입니다")
+            return
+
+        try:
+            self._pool.closeall()
+            self._pool = None
+            self._is_connected = False
+            logger.info("PostgreSQL 연결 풀 해제 완료")
+
+        except Exception as e:
+            logger.error("연결 풀 해제 중 오류: %s", e)
+            raise DatabaseError("연결 풀 해제 실패") from e
+
+    @contextmanager
+    def get_connection(self):
+        """
+        연결 풀에서 연결 획득 (컨텍스트 매니저)
+
+        Yields:
+            psycopg2.connection: 데이터베이스 연결
+        """
+        if not self._is_connected or not self._pool:
+            raise DatabaseError("연결 풀이 초기화되지 않았습니다. connect()를 먼저 호출하세요")
+
+        connection = None
+        try:
+            connection = self._pool.getconn()
+            logger.debug("연결 풀에서 연결 획득")
+            yield connection
+
+        except psycopg2.Error as e:
+            if connection:
+                connection.rollback()
+            raise DatabaseError("데이터베이스 연결 오류") from e
+
+        finally:
+            if connection:
+                self._pool.putconn(connection)
+                logger.debug("연결 풀에 연결 반환")
+
+    def test_connection(self) -> bool:
+        """연결 테스트"""
+        try:
+            if not self._is_connected:
+                self.connect()
+
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    result = cursor.fetchone()
+                    success = result is not None
+
+            logger.info("연결 테스트 %s", "성공" if success else "실패")
+            return success
+
+        except Exception as e:
+            logger.error("연결 테스트 실패: %s", e)
+            return False
+
+    def fetch_data(
+        self,
+        query: str,
+        params: Optional[Dict[str, Any]] = None,
+        table_name: Optional[str] = None,
+        columns: Optional[List[str]] = None,
+        time_range: Optional[Tuple[datetime, datetime]] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        데이터 조회 (SELECT 쿼리)
+
+        기존 main.py의 데이터베이스 조회 로직을 모듈화한 것입니다.
+        """
+        logger.debug("fetch_data() 호출: query=%s, params=%s", query[:100], params)
+
+        if not self._is_connected:
+            self.connect()
+
+        # 동적 쿼리 생성
+        if table_name or columns or time_range:
+            query, dynamic_params = self.build_dynamic_query(query, table_name, columns, time_range)
+            # 매개변수 병합
+            if params:
+                dynamic_params.update(params)
+            params = dynamic_params
+
+        # LIMIT 절 추가
+        if limit and limit > 0:
+            query += f" LIMIT {limit}"
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
+                    # 쿼리 실행
+                    cursor.execute(query, params or {})
+
+                    # 결과 조회
+                    results = cursor.fetchall()
+
+                    # RealDictRow를 일반 딕셔너리로 변환
+                    data = [dict(row) for row in results]
+
+                    logger.info("데이터 조회 완료: %d행", len(data))
+                    return data
+
+        except psycopg2.Error as e:
+            error_msg = f"데이터 조회 실패: {e}"
+            logger.error(error_msg)
+            raise DatabaseError(
+                error_msg,
+                details={
+                    "query": query[:200],
+                    "params": params,
+                    "error_code": e.pgcode if hasattr(e, "pgcode") else None,
+                },
+            ) from e
+
+    def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None, commit: bool = True) -> int:
+        """
+        쿼리 실행 (INSERT, UPDATE, DELETE)
+
+        기존 main.py의 쿼리 실행 로직을 모듈화한 것입니다.
+        """
+        logger.debug("execute_query() 호출: query=%s, commit=%s", query[:100], commit)
+
+        if not self._is_connected:
+            self.connect()
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # 쿼리 실행
+                    cursor.execute(query, params or {})
+
+                    # 영향받은 행 수
+                    rowcount = cursor.rowcount
+
+                    # 트랜잭션 처리
+                    if commit:
+                        conn.commit()
+                        logger.debug("트랜잭션 커밋 완료")
+
+                    logger.info("쿼리 실행 완료: %d행 영향", rowcount)
+                    return rowcount
+
+        except psycopg2.Error as e:
+            error_msg = f"쿼리 실행 실패: {e}"
+            logger.error(error_msg)
+            raise DatabaseError(
+                error_msg,
+                details={
+                    "query": query[:200],
+                    "params": params,
+                    "error_code": e.pgcode if hasattr(e, "pgcode") else None,
+                },
+            ) from e
+
+    def fetch_peg_data(
+        self,
+        table_name: str,
+        columns: Dict[str, str],
+        time_range: Tuple[datetime, datetime],
+        filters: Optional[Dict[str, Any]] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        PEG 데이터 전용 조회 메서드 (기존 main.py 로직 기반)
+
+        Args:
+            table_name (str): 테이블명
+            columns (Dict[str, str]): 컬럼 매핑 (time, peg_name, value, ne, cellid, host)
+            time_range (Tuple[datetime, datetime]): 시간 범위
+            filters (Optional[Dict[str, Any]]): 추가 필터 조건
+            limit (Optional[int]): 결과 개수 제한
+
+        Returns:
+            List[Dict[str, Any]]: PEG 데이터 목록
+        """
+        logger.info("fetch_peg_data() 호출: table=%s, time_range=%s", table_name, time_range)
+
+        # 기본 SELECT 쿼리 구성
+        select_columns = [
+            f"{columns['time']} as timestamp",
+            f"{columns['peg_name']} as peg_name",
+            f"{columns['value']} as value",
+        ]
+
+        # 선택적 컬럼들 추가
+        optional_columns = ["ne", "cellid", "host"]
+        for col_key in optional_columns:
+            if col_key in columns and columns[col_key]:
+                select_columns.append(f"{columns[col_key]} as {col_key}")
+
+        # 쿼리 구성
+        query = f"SELECT {', '.join(select_columns)} FROM {table_name}"
+
+        # WHERE 조건 구성
+        conditions = []
+        params = {}
+
+        # 시간 범위 조건
+        start_time, end_time = time_range
+        conditions.append(f"{columns['time']} BETWEEN %(start_time)s AND %(end_time)s")
+        params["start_time"] = start_time
+        params["end_time"] = end_time
+
+        # 추가 필터 조건
+        if filters:
+            for key, value in filters.items():
+                if key in columns and value is not None:
+                    conditions.append(f"{columns[key]} = %({key})s")
+                    params[key] = value
+
+        # WHERE 절 추가
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        # 정렬 (시간순)
+        query += f" ORDER BY {columns['time']}"
+
+        # LIMIT 추가
+        if limit and limit > 0:
+            query += f" LIMIT {limit}"
+
+        return self.fetch_data(query, params)
+
+    def get_table_info(self, table_name: str) -> Dict[str, Any]:
+        """
+        테이블 정보 조회
+
+        Args:
+            table_name (str): 테이블명
+
+        Returns:
+            Dict[str, Any]: 테이블 정보 (컬럼, 인덱스 등)
+        """
+        logger.debug("get_table_info() 호출: table=%s", table_name)
+
+        # 컬럼 정보 조회
+        column_query = """
+        SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns 
+        WHERE table_name = %(table_name)s
+        ORDER BY ordinal_position
+        """
+
+        columns = self.fetch_data(column_query, {"table_name": table_name})
+
+        # 인덱스 정보 조회
+        index_query = """
+        SELECT indexname, indexdef
+        FROM pg_indexes 
+        WHERE tablename = %(table_name)s
+        """
+
+        indexes = self.fetch_data(index_query, {"table_name": table_name})
+
+        return {
+            "table_name": table_name,
+            "columns": columns,
+            "indexes": indexes,
+            "column_count": len(columns),
+            "index_count": len(indexes),
+        }
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        """연결 정보 반환 (민감 정보 제외)"""
+        return {
+            "host": self.config["host"],
+            "port": self.config["port"],
+            "database": self.config["database"],
+            "user": self.config["user"],
+            "pool_size": self.config["pool_size"],
+            "is_connected": self._is_connected,
+            "pool_status": "active" if self._pool else "inactive",
+        }
+
+    def __enter__(self):
+        """컨텍스트 매니저 진입"""
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """컨텍스트 매니저 종료"""
+        self.disconnect()
+
+        # 예외 발생 시 로그 기록
+        if exc_type:
+            logger.error("컨텍스트 매니저에서 예외 발생: %s", exc_val)
+
+        return False  # 예외를 다시 발생시킴
