@@ -1486,22 +1486,23 @@ class MCPHandler:
         """
         self.logger.debug("_format_response_for_mcp() 호출: 응답 형식 변환")
         
-        # 기존 MCP 응답 형식과 호환되도록 변환
-        mcp_response = {
-            "status": analysis_result.get("status", "success"),
-            "message": "분석이 성공적으로 완료되었습니다.",
-            "analysis_type": analysis_result.get("analysis_type", "enhanced"),
-            "time_ranges": analysis_result.get("time_ranges", {}),
-            "data_summary": analysis_result.get("data_summary", {}),
-            "results": analysis_result.get("llm_analysis", {}),
-            "metadata": analysis_result.get("metadata", {})
-        }
+        # 중복 제거: AnalysisService 결과를 그대로 사용하고 필요한 필드만 추가/변경
+        mcp_response = analysis_result.copy()
         
-        # 백엔드 전송 결과가 있으면 포함
-        if "backend_response" in analysis_result:
+        # MCP 전용 필드 추가
+        if mcp_response.get("status") == "success":
+            mcp_response["message"] = "분석이 성공적으로 완료되었습니다."
+        elif mcp_response.get("status") == "error":
+            mcp_response["message"] = mcp_response.get("message", "분석 중 오류가 발생했습니다.")
+        
+        # 백엔드에서 중복 처리하므로 MCP 측 중복 코드 제거됨
+        # 하위 호환성은 백엔드 응답에서 처리
+        
+        # 백엔드 전송 결과가 있으면 포함 (이미 analysis_result에 있으면 중복 방지)
+        if "backend_response" in analysis_result and "backend_response" not in mcp_response:
             mcp_response["backend_response"] = analysis_result["backend_response"]
         
-        self.logger.info("MCP 응답 형식 변환 완료: %d개 키", len(mcp_response))
+        self.logger.info("MCP 응답 형식 변환 완료: %d개 키 (중복 제거됨)", len(mcp_response))
         return mcp_response
     
     def handle_request(self, request: dict) -> dict:
