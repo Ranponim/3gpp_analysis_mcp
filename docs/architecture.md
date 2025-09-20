@@ -711,3 +711,19 @@ services:
 ---
 
 이 아키텍처는 확장 가능하고 유지보수가 용이한 고품질 시스템을 제공합니다. 🏗️
+
+## 프롬프트 시스템 통합 (v1)
+
+- 템플릿 외부화: `config/prompts/v1.yaml` (환경 변수 `PROMPT_CONFIG_PATH`로 경로 오버라이드)
+- 로더 컴포넌트: `analysis_llm/config/prompt_loader.py`
+  - 기능: YAML 로드 → Pydantic 스키마 검증 → 템플릿 선택/포맷팅 → 캐싱/리로드 지원
+  - 주요 API:
+    - `PromptLoader(path).format_prompt(prompt_type, **vars)`
+    - `get_available_prompt_types()`, `get_metadata()`, `reload_config()`
+- 스키마: `analysis_llm/config/prompt_schema.py` (Pydantic v2)
+  - 최소 조건: `metadata`, `prompts` 존재, 템플릿은 비지 않은 문자열
+- 로깅 표준화:
+  - 중앙 설정 `config.settings.get_settings().setup_logging()`에서 단일 진입점 구성
+  - 모듈 개별 `basicConfig` 호출 제거, E2E 모드에서 파일 핸들러만 추가
+- 폴백 전략:
+  - 템플릿 포맷 실패 시 최소 문자열 프롬프트 생성으로 안전 가드

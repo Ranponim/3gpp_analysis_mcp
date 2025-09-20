@@ -29,3 +29,11 @@ node_modules/
 
 # OS specific
 .DS_Store
+
+# Task files
+# tasks.json
+# tasks/ 
+
+# Python bytecode and cache
+__pycache__/
+*.pyc

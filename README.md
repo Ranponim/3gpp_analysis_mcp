@@ -551,3 +551,19 @@ docker-compose logs analysis-service | grep "execution_time_ms"
 ---
 
 **이제 프로덕션 배포 준비가 완료된 최고 품질의 Clean Architecture 시스템입니다!** 🚀
+
+## Prompt Configuration (Externalized)
+
+- Default file: `config/prompts/v1.yaml` (override via `PROMPT_CONFIG_PATH`)
+- Validate & load with `PromptLoader` (Pydantic schema enforced)
+- Example:
+
+```python
+from analysis_llm.config.prompt_loader import PromptLoader
+prompt = PromptLoader().format_prompt('enhanced', n1_range='...', n_range='...', data_preview='...')
+```
+
+## Logging Standardization
+
+- Single entrypoint: `config.settings.get_settings().setup_logging()`
+- Avoid per-module `logging.basicConfig`; E2E adds a file handler only when needed.

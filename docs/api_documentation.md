@@ -677,3 +677,33 @@ except requests.exceptions.RequestException as e:
 ---
 
 이 API는 높은 성능과 안정성을 제공하는 프로덕션 준비 완료 시스템입니다. 🚀
+
+## Prompt Configuration API
+
+- Path resolution order: ctor `config_path` > env `PROMPT_CONFIG_PATH` > default `config/prompts/v1.yaml`
+- Basic usage:
+
+```python
+from analysis_llm.config.prompt_loader import PromptLoader
+from analysis_llm.utils.data_formatter import format_dataframe_for_prompt
+
+def build_enhanced_prompt(df, n1, n):
+    loader = PromptLoader()  # will honor PROMPT_CONFIG_PATH
+    preview = format_dataframe_for_prompt(df)
+    return loader.format_prompt(
+        'enhanced', n1_range=n1, n_range=n, data_preview=preview
+    )
+```
+
+- Metadata & types:
+
+```python
+loader.get_metadata()
+loader.get_available_prompt_types()
+```
+
+- Reload on file change:
+
+```python
+loader.reload_config()
+```

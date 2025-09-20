@@ -468,6 +468,30 @@ class AnalysisService:
                 enable_mock=enable_mock,
             )
 
+            # 4.5단계: Choi Deterministic 판정 (옵션)
+            use_choi = bool(request.get("use_choi", False))
+            choi_result_normalized = None
+            if use_choi:
+                logger.info("4.5단계: Choi Deterministic 판정 실행")
+                try:
+                    from .deterministic_judgement_service import run_choi_judgement
+                    # MCP 표준 요청 바디 생성(백엔드 요구 형태와 동일 구조 사용)
+                    choi_request = {
+                        "input_data": request.get("input_data", {}),
+                        "cell_ids": request.get("cell_ids", []),
+                        "time_range": request.get("time_range", {}),
+                        "compare_mode": request.get("compare_mode", True),
+                    }
+                    choi_result_normalized = run_choi_judgement(choi_request)
+                except Exception as e:  # pragma: no cover
+                    logger.error("Choi 판정 실행 실패(계속 진행): %s", e, exc_info=True)
+                    choi_result_normalized = {
+                        "overall": None,
+                        "reasons": ["Choi judgement failed"],
+                        "by_kpi": {},
+                        "warnings": [str(e)],
+                    }
+
             # 5단계: 데이터 변환 (DataProcessor 사용)
             logger.info("5단계: 데이터 변환 (DataProcessor 위임)")
             try:
@@ -487,6 +511,12 @@ class AnalysisService:
                 analyzed_peg_results=analyzed_peg_results,
                 llm_result=llm_result,
             )
+
+            # 6.5단계: peg_analysis에 choi_judgement 병합(옵션)
+            if choi_result_normalized is not None:
+                logger.info("6.5단계: peg_analysis.choi_judgement 병합")
+                peg_analysis = final_result.setdefault("peg_analysis", {})
+                peg_analysis["choi_judgement"] = choi_result_normalized
 
             logger.info("전체 분석 워크플로우 완료: 결과키=%d개", len(final_result))
             return final_result

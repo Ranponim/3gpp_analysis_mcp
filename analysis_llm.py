@@ -567,61 +567,7 @@ def process_and_visualize(n1_df: pd.DataFrame, n_df: pd.DataFrame) -> Tuple[pd.D
         raise
 
 
-# --- LLM 프롬프트 생성 (통합 분석) [구버전: 호환성 유지 목적, 미사용 예정] ---
-def create_llm_analysis_prompt_overall(processed_df: pd.DataFrame, n1_range: str, n_range: str) -> str:
-    """
-    전체 PEG를 통합한 셀 단위 종합 분석 프롬프트를 생성합니다.
-
-    가정: n-1과 n은 동일한 시험환경에서 수행됨.
-    기대 출력(JSON):
-      {
-        "overall_summary": "...",
-        "key_findings": ["..."],
-        "recommended_actions": ["..."],
-        "cells_with_significant_change": {"CELL_A": "설명", ...}
-      }
-    """
-    # LLM 입력은 맥락/가정/출력 요구사항을 명확히 포함해야 일관된 답변을 유도할 수 있다
-    logging.info("create_llm_analysis_prompt_overall() 호출: 프롬프트 생성 시작")
-    # 경량 표 포맷터 사용: 열 제한 및 행 제한을 사전에 적용
-    preview_cols = [c for c in processed_df.columns if c in ("peg_name", "avg_value", "period")]
-    if not preview_cols:
-        preview_cols = list(processed_df.columns)[:5]
-    preview_df = processed_df[preview_cols].head(200)
-    data_preview = preview_df.to_string(index=False)
-    prompt = f"""
-    당신은 3GPP 이동통신망 최적화를 전공한 MIT 박사급 전문가입니다. 다음 표는 PEG 단위로 집계한 결과이며, 두 기간은 동일한 시험환경에서 수행되었다고 가정합니다.
-
-[입력 데이터 개요]
-- 기간 n-1: {n1_range}
-- 기간 n: {n_range}
-    - 표 컬럼: peg_name, avg_n_minus_1, avg_n, diff, pct_change
-    - 원본 스키마 예시: id(int), datetime(ts), value(double), version(text), family_name(text), cellid(text), peg_name(text), host(text), ne(text)
-      (평균은 value 컬럼 기준)
-
-[데이터 표]
-{data_preview}
-
-[분석 지침]
-- 3GPP TS/TR 권고와 운용 관행에 근거하여 전문적으로 해석하세요. (예: TS 36.300/38.300, TR 36.902 등)
-- 변화율의 크기와 방향을 정량적으로 해석하고, 셀/PEG 특성, 주파수/대역폭, 스케줄링, 간섭, 핸드오버, 로드, 백홀 등 잠재 요인을 체계적으로 가정-검증 형태로 제시하세요.
-- 동일 환경 가정에서 성립하지 않을 수 있는 교란 요인(라우팅 변경, 소프트웨어 버전, 파라미터 롤백, 단말 믹스 변화 등)을 명시하세요.
-- 원인-영향 사슬을 간결하게 제시하고, 관찰 가능한 검증 로그/지표를 함께 제안하세요.
-
-[출력 요구]
-- 간결하지만 고신뢰 요약을 제공하고, 핵심 관찰과 즉시 실행 가능한 개선/추가 검증 액션을 분리해 주세요.
-- 출력은 반드시 아래 JSON 스키마를 정확히 따르세요.
-
-[출력 형식(JSON)]
-{{
-  "overall_summary": "...",
-  "key_findings": ["..."],
-  "recommended_actions": ["..."],
-  "cells_with_significant_change": {{"CELL_NAME": "설명"}}
-}}
-"""
-    logging.info("create_llm_analysis_prompt_overall() 완료")
-    return prompt
+ 
 
 
 # --- LLM 프롬프트 생성 (고도화된 종합 분석) ---
