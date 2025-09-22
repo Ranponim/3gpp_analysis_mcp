@@ -19,10 +19,8 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Union
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from exceptions import ServiceError
-from models import AggregatedPEGData, PEGConfig, PEGData, TimeRange
+from ..exceptions import ServiceError
+from ..models import AggregatedPEGData, PEGConfig, PEGData, TimeRange
 
 # 로깅 설정
 logger = logging.getLogger(__name__)

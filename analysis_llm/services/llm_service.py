@@ -20,10 +20,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from exceptions import LLMError, ServiceError
-from repositories import LLMClient, LLMRepository
+from ..exceptions import LLMError, ServiceError
+from ..repositories import LLMClient, LLMRepository
 
 # 로깅 설정
 logger = logging.getLogger(__name__)

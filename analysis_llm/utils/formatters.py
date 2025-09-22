@@ -14,15 +14,11 @@ import json
 import logging
 import os
 
-# 임시로 절대 import 사용 (나중에 패키지 구조 정리 시 수정)
-import sys
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from models import AnalysisResponse, AnalysisStats, LLMAnalysisResult, PEGStatistics
+from ..models import AnalysisResponse, AnalysisStats, LLMAnalysisResult, PEGStatistics
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
