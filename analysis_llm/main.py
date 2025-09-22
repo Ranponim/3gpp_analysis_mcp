@@ -61,15 +61,13 @@ import os  # 환경변수 및 파일 시스템 접근
 import sys
 import time  # 성능 측정 및 시간 관련 기능
 
-from repositories import LLMClient, PostgreSQLRepository
-from services import AnalysisService, AnalysisServiceError
+from .repositories import LLMClient, PostgreSQLRepository
+from .services import AnalysisService, AnalysisServiceError
 
 # ===========================================
 # 로컬 모듈 imports
 # ===========================================
-from utils import TimeParsingError, TimeRangeParser
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from .utils import TimeParsingError, TimeRangeParser
 
 # 전역 설정 인스턴스 (지연 로딩)
 _app_settings = None
