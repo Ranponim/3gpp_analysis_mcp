@@ -24,11 +24,6 @@ from typing import Any, Dict, List, Optional
 import requests
 import urllib3
 
-# 프로젝트 루트를 sys.path에 추가
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
 # config 모듈 지연 import
 _config_get_settings = None
 
@@ -43,7 +38,7 @@ def get_config_settings():
     return _config_get_settings()
 
 
-from exceptions import LLMError
+from ..exceptions import LLMError
 
 # 로깅 설정
 logger = logging.getLogger(__name__)

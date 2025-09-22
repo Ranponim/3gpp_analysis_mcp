@@ -14,14 +14,11 @@ import logging
 import os
 import re
 
-# 임시로 절대 import 사용 (나중에 패키지 구조 정리 시 수정)
-import sys
 from typing import Any, Dict, Optional, Union
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from exceptions import ValidationError
-from utils import TimeParsingError, TimeRangeParser
+from ..exceptions import ValidationError
+from .exceptions import TimeParsingError
+from .time_parser import TimeRangeParser
 
 # 로깅 설정
 logger = logging.getLogger(__name__)

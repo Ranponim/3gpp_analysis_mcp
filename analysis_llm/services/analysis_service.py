@@ -19,11 +19,9 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-from exceptions import ServiceError
-from repositories import DatabaseRepository
-from utils import AnalyzedPEGResult, DataProcessingError, DataProcessor, TimeParsingError, TimeRangeParser
+from ..exceptions import ServiceError
+from ..repositories import DatabaseRepository
+from ..utils import AnalyzedPEGResult, DataProcessingError, DataProcessor, TimeParsingError, TimeRangeParser
 
 from .llm_service import LLMAnalysisService
 from .peg_processing_service import PEGProcessingError, PEGProcessingService
