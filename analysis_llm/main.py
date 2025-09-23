@@ -1845,6 +1845,187 @@ def analyze_cell_performance_with_llm(request: dict) -> dict:
         return handler.handle_request(request)
 
 
+@mcp.tool
+def analyze_peg_comparison(request: dict) -> dict:
+    """
+    MCP 엔드포인트: PEG 비교분석 실행
+    
+    N-1 기간과 N 기간의 PEG 성능 지표를 비교하여 통계적 분석을 수행합니다.
+    프론트엔드의 계산 로직을 MCP 서버로 이전하여 성능을 향상시킵니다.
+    
+    Args:
+        request (dict): PEG 비교분석 요청 데이터
+            - analysis_id (str): 분석 고유 식별자
+            - raw_data (dict): 원시 KPI 데이터
+                - stats (list): KPI 통계 데이터 리스트
+                    - kpi_name (str): KPI 이름
+                    - period (str): 기간 ("N-1" 또는 "N")
+                    - avg (float): 평균값
+                    - cell_id (str): 셀 ID
+                - peg_definitions (dict): PEG 정의
+                    - peg_name (str): PEG 이름
+                    - weight (int): 가중치
+                    - thresholds (dict): 임계값 설정
+            - options (dict, optional): 분석 옵션
+                - include_metadata (bool): 메타데이터 포함 여부
+                - algorithm_version (str): 알고리즘 버전
+    
+    Returns:
+        dict: PEG 비교분석 결과
+            - success (bool): 성공 여부
+            - data (dict): 분석 결과 데이터
+                - analysis_id (str): 분석 ID
+                - peg_comparison_results (list): PEG별 비교 결과
+                - summary (dict): 전체 요약 통계
+                - analysis_metadata (dict): 분석 메타데이터
+            - error (dict, optional): 오류 정보
+            - processing_time (float): 처리 시간 (초)
+            - algorithm_version (str): 사용된 알고리즘 버전
+            - cached (bool): 캐시 사용 여부
+    
+    Example:
+        {
+            "analysis_id": "peg_analysis_001",
+            "raw_data": {
+                "stats": [
+                    {
+                        "kpi_name": "UL_throughput_avg",
+                        "period": "N-1",
+                        "avg": 45.2,
+                        "cell_id": "cell_001"
+                    },
+                    {
+                        "kpi_name": "UL_throughput_avg", 
+                        "period": "N",
+                        "avg": 48.7,
+                        "cell_id": "cell_001"
+                    }
+                ],
+                "peg_definitions": {
+                    "UL_throughput_avg": {
+                        "weight": 3,
+                        "thresholds": {"high": 20.0, "medium": 10.0}
+                    }
+                }
+            },
+            "options": {
+                "include_metadata": true,
+                "algorithm_version": "v2.1.0"
+            }
+        }
+    """
+    logger = logging.getLogger(__name__ + '.peg_comparison')
+    logger.info("=" * 20 + " PEG 비교분석 MCP 요청 처리 시작 " + "=" * 20)
+    
+    try:
+        # 1단계: 요청 데이터 검증 및 변환
+        logger.info("1단계: 요청 데이터 검증 및 변환")
+        
+        # Pydantic 모델을 사용한 요청 검증
+        from models.peg_comparison import PEGComparisonRequest, RawData, Options
+        
+        # raw_data 검증
+        if 'raw_data' not in request:
+            raise ValueError("'raw_data' 필드가 누락되었습니다.")
+        
+        raw_data = RawData(**request['raw_data'])
+        logger.info("RawData 검증 완료: stats=%d개, peg_definitions=%d개", 
+                   len(raw_data.stats), len(raw_data.peg_definitions))
+        
+        # options 검증 (선택적)
+        options = None
+        if 'options' in request and request['options']:
+            options = Options(**request['options'])
+            logger.info("Options 검증 완료: include_metadata=%s, algorithm_version=%s",
+                       options.include_metadata, options.algorithm_version)
+        
+        # analysis_id 검증
+        analysis_id = request.get('analysis_id', 'default_analysis_id')
+        if not isinstance(analysis_id, str) or not analysis_id.strip():
+            analysis_id = f"peg_analysis_{int(time.time())}"
+        
+        logger.info("요청 검증 완료: analysis_id=%s", analysis_id)
+        
+        # 2단계: PEGComparisonAnalyzer 인스턴스 생성
+        logger.info("2단계: PEGComparisonAnalyzer 인스턴스 생성")
+        from services.peg_comparison_service import PEGComparisonAnalyzer
+        
+        analyzer = PEGComparisonAnalyzer()
+        logger.info("PEGComparisonAnalyzer 초기화 완료")
+        
+        # 3단계: PEG 비교분석 실행
+        logger.info("3단계: PEG 비교분석 실행")
+        start_time = time.perf_counter()
+        
+        # options를 딕셔너리로 변환 (PEGComparisonAnalyzer가 딕셔너리를 기대)
+        options_dict = None
+        if options:
+            options_dict = options.dict()
+        
+        # async 함수를 동기적으로 실행
+        import asyncio
+        response = asyncio.run(analyzer.analysis_peg_comparison(raw_data, options_dict))
+        
+        processing_time = time.perf_counter() - start_time
+        logger.info("PEG 비교분석 완료: %.4f초 소요", processing_time)
+        
+        # 4단계: 응답 형식 변환 (Pydantic 모델을 딕셔너리로)
+        logger.info("4단계: 응답 형식 변환")
+        
+        if response.success:
+            # 성공 응답을 딕셔너리로 변환
+            mcp_response = {
+                "success": True,
+                "data": response.data.dict() if response.data else None,
+                "processing_time": processing_time,
+                "algorithm_version": response.algorithm_version,
+                "cached": response.cached
+            }
+            logger.info("성공 응답 생성: data_keys=%s", 
+                       list(response.data.dict().keys()) if response.data else "None")
+        else:
+            # 실패 응답
+            mcp_response = {
+                "success": False,
+                "error": response.error,
+                "processing_time": processing_time,
+                "algorithm_version": response.algorithm_version,
+                "cached": response.cached
+            }
+            logger.warning("실패 응답 생성: error=%s", response.error)
+        
+        logger.info("=" * 20 + " PEG 비교분석 MCP 요청 처리 완료 " + "=" * 20)
+        return mcp_response
+        
+    except ValueError as ve:
+        # 검증 오류
+        logger.error("요청 검증 실패: %s", ve)
+        return {
+            "success": False,
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": str(ve),
+                "details": "요청 데이터 형식이 올바르지 않습니다."
+            },
+            "processing_time": 0.0,
+            "algorithm_version": "unknown"
+        }
+        
+    except Exception as e:
+        # 예상치 못한 오류
+        logger.exception("PEG 비교분석 중 예상치 못한 오류 발생: %s", e)
+        return {
+            "success": False,
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": f"내부 서버 오류: {str(e)}",
+                "details": "PEG 비교분석 처리 중 오류가 발생했습니다."
+            },
+            "processing_time": 0.0,
+            "algorithm_version": "unknown"
+        }
+
+
 # ===========================================
 # End-to-End Integration & Testing
 # ===========================================
