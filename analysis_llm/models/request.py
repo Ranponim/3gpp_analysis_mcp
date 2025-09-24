@@ -173,13 +173,13 @@ class AnalysisRequest:
         backend_url = data.get("backend_url")
 
         # 데이터베이스 설정
-        db_data = data.get("db", {})
+        db_data = data.get("db") or {}
         db_config = DatabaseConfig(
-            host=db_data.get("host", "127.0.0.1"),
-            port=int(db_data.get("port", 5432)),
-            user=db_data.get("user", "postgres"),
-            password=db_data.get("password", ""),
-            dbname=db_data.get("dbname", "postgres"),
+            host=db_data.get("host", _DEFAULT_DB_HOST),
+            port=int(db_data.get("port", _DEFAULT_DB_PORT)),
+            user=db_data.get("user", _DEFAULT_DB_USER),
+            password=db_data.get("password", _DEFAULT_DB_PASSWORD),
+            dbname=db_data.get("dbname", _DEFAULT_DB_NAME),
         )
 
         # 테이블 설정
