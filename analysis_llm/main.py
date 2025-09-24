@@ -1144,7 +1144,7 @@ class MCPHandler:
                 redacted[key] = "***REDACTED***"
                 continue
 
-        if lowered in {"db", "database", "connection"}:
+            if lowered in {"db", "database", "connection"}:
                 # DB 설정은 중첩 딕셔너리일 확률이 높으므로 재귀적으로 마스킹한다.
                 redacted[key] = self._sanitize_for_logging(value)
                 continue
