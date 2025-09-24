@@ -143,9 +143,78 @@ class AnalysisService:
                 "data_processor": type(self.data_processor).__name__,
                 "database_repository": (
                     type(self.database_repository).__name__ if self.database_repository else None
-                ),  # 레거시
+                ),
             },
         }
+
+    def _build_time_ranges_payload(
+        self, request: Dict[str, Any], time_ranges: tuple[datetime, datetime, datetime, datetime]
+    ) -> Dict[str, Any]:
+        """시간 범위 정보를 표준 구조로 변환"""
+
+        n1_start, n1_end, n_start, n_end = time_ranges
+
+        return {
+            "n_minus_1": {
+                "start": n1_start.isoformat(),
+                "end": n1_end.isoformat(),
+                "range_text": request.get("n_minus_1"),
+                "duration_hours": round((n1_end - n1_start).total_seconds() / 3600, 2),
+            },
+            "n": {
+                "start": n_start.isoformat(),
+                "end": n_end.isoformat(),
+                "range_text": request.get("n"),
+                "duration_hours": round((n_end - n_start).total_seconds() / 3600, 2),
+            },
+        }
+
+    def _normalize_llm_analysis(self, llm_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """LLM 분석 결과를 표준 DTO로 정규화"""
+
+        if not isinstance(llm_result, dict):
+            return {}
+
+        summary = (
+            llm_result.get("summary")
+            or llm_result.get("executive_summary")
+            or llm_result.get("overall_summary")
+        )
+
+        return {
+            "summary": summary,
+            "issues": llm_result.get("issues"),
+            "recommended_actions": llm_result.get("recommended_actions"),
+            "peg_insights": llm_result.get("peg_insights", {}),
+            "confidence": llm_result.get("confidence") or llm_result.get("confidence_score"),
+            "model": llm_result.get("model") or llm_result.get("model_used"),
+        }
+
+    def _build_metadata_payload(
+        self,
+        request: Dict[str, Any],
+        summary_stats: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """응답 메타데이터 구성"""
+
+        metadata: Dict[str, Any] = {
+            "workflow_version": "4.0",
+            "processing_timestamp": datetime.utcnow().isoformat(),
+            "request_id": request.get("request_id", "unknown"),
+            "analysis_id": request.get("analysis_id"),
+            "analysis_type": request.get("analysis_type", "enhanced"),
+            "selected_pegs": request.get("selected_pegs") or [],
+            "filters": request.get("filters", {}),
+            "total_pegs": summary_stats.get("total_pegs"),
+            "complete_data_pegs": summary_stats.get("complete_data_pegs"),
+            "source": "mcp.analysis_service",
+        }
+
+        output_dir = request.get("output_dir")
+        if output_dir:
+            metadata["output_dir"] = output_dir
+
+        return metadata
 
     def validate_request(self, request: Dict[str, Any]) -> None:
         """
@@ -647,52 +716,28 @@ class AnalysisService:
 
         n1_start, n1_end, n_start, n_end = time_ranges
 
-        # DataProcessor 요약 통계 생성
         summary_stats = self.data_processor.create_summary_statistics(analyzed_peg_results)
+        normalized_llm = self._normalize_llm_analysis(llm_result)
 
-        # 기본 결과 구조 (DataProcessor 결과 통합)
-        result = {
+        peg_metrics = [result.to_dict() for result in analyzed_peg_results]
+
+        response_payload = {
             "status": "success",
-            "analysis_type": request.get("analysis_type", "enhanced"),
-            "time_ranges": {
-                "n_minus_1": {
-                    "start": n1_start.isoformat(),
-                    "end": n1_end.isoformat(),
-                    "range_text": request["n_minus_1"],
-                },
-                "n": {"start": n_start.isoformat(), "end": n_end.isoformat(), "range_text": request["n"]},
-            },
-            "data_summary": {
-                "total_pegs": summary_stats["total_pegs"],
-                "complete_data_pegs": summary_stats["complete_data_pegs"],
-                "incomplete_data_pegs": summary_stats["incomplete_data_pegs"],
-                "has_data": summary_stats["total_pegs"] > 0,
-            },
-            "peg_analysis": {
-                "results": [result.to_dict() for result in analyzed_peg_results],
+            "time_ranges": self._build_time_ranges_payload(request, time_ranges),
+            "peg_metrics": {
+                "items": peg_metrics,
                 "statistics": summary_stats,
             },
-            "llm_analysis": llm_result,
-            "metadata": {
-                "workflow_version": "3.0",  # DataProcessor 통합 버전
-                "processing_timestamp": datetime.now().isoformat(),
-                "request_id": request.get("request_id", "unknown"),
-                "enable_mock": request.get("enable_mock", False),
-                "data_processor": True,
-            },
+            "llm_analysis": normalized_llm,
+            "metadata": self._build_metadata_payload(request, summary_stats),
         }
 
-        # 선택적 필드들 추가
-        if "selected_pegs" in request and request["selected_pegs"]:
-            result["selected_pegs"] = request["selected_pegs"]
-
-        if "output_dir" in request:
-            result["output_dir"] = request["output_dir"]
-
         logger.info(
-            "DataProcessor 결과 조립 완료: %d개 최상위 키, %d개 PEG 분석", len(result), len(analyzed_peg_results)
+            "DataProcessor 결과 조립 완료: metrics=%d, summary=%s",
+            len(peg_metrics),
+            summary_stats,
         )
-        return result
+        return response_payload
 
     def get_workflow_status(self) -> Dict[str, Any]:
         """워크플로우 상태 정보 반환"""

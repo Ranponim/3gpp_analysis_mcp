@@ -63,6 +63,7 @@ import time  # 성능 측정 및 시간 관련 기능
 
 from .repositories import LLMClient, PostgreSQLRepository
 from .services import AnalysisService, AnalysisServiceError
+from .models.request import AnalysisRequest
 
 # ===========================================
 # 로컬 모듈 imports
@@ -276,7 +277,7 @@ import re  # 정규표현식 (시간 범위 파싱용)
 # ===========================================
 # 외부 라이브러리 imports
 # ===========================================
-from typing import Dict, Optional, Tuple  # 타입 힌트 지원
+from typing import Any, Dict, Optional, Tuple  # 타입 힌트 지원
 
 import pandas as pd  # 데이터 처리 및 분석
 import psycopg2  # PostgreSQL 데이터베이스 연결
@@ -1212,76 +1213,58 @@ class MCPHandler:
         self.logger.info("기본 요청 검증 통과: n_minus_1=%s, n=%s", n1_text, n_text)
     
     def _parse_request_to_analysis_format(self, request: dict) -> dict:
-        """
-        MCP 요청을 AnalysisService 형식으로 변환
-        
-        Args:
-            request (dict): 원본 MCP 요청
-            
-        Returns:
-            dict: AnalysisService 호환 형식
-        """
+        """MCP 요청을 표준 AnalysisRequest 스키마로 변환"""
         self.logger.debug("_parse_request_to_analysis_format() 호출: 요청 형식 변환")
-        
-        # 기본 필드
-        analysis_request = {
-            'n_minus_1': request.get('n_minus_1') or request.get('n1'),
-            'n': request.get('n'),
-            'output_dir': request.get('output_dir', os.path.abspath('./analysis_output')),
-            'analysis_type': 'enhanced',  # 기본값
-            'enable_mock': False  # 프로덕션 모드
+
+        enriched_request = {
+            **request,
+            "backend_url": request.get("backend_url") or self.default_backend_url,
+            "db": request.get("db") or self.default_db,
+            "max_prompt_tokens": request.get("max_prompt_tokens", DEFAULT_MAX_PROMPT_TOKENS),
+            "max_prompt_chars": request.get("max_prompt_chars", DEFAULT_MAX_PROMPT_CHARS),
         }
-        
-        # 백엔드 URL 설정
-        analysis_request['backend_url'] = request.get('backend_url') or self.default_backend_url
-        
-        # DB 설정
-        analysis_request['db'] = request.get('db', self.default_db)
-        
-        # 테이블 및 컬럼 설정
-        analysis_request['table'] = request.get('table') or 'summary'
-        analysis_request['columns'] = request.get('columns', {
-            "time": 'datetime',
-            "peg_name": 'peg_name',
-            "value": 'value',
-            "ne": 'ne',
-            "cellid": 'cellid',
-            "host": 'host'
-        })
-        
-        # 필터 설정
-        filters = {}
-        if request.get('ne'):
-            filters['ne'] = request['ne']
-        if request.get('cellid') or request.get('cell'):
-            filters['cellid'] = request.get('cellid') or request.get('cell')
-        if request.get('host'):
-            filters['host'] = request['host']
-        analysis_request['filters'] = filters
-        
-        # PEG 관련 설정
-        if request.get('preference') or request.get('selected_pegs'):
-            analysis_request['selected_pegs'] = request.get('selected_pegs') or request.get('preference')
-        
-        if request.get('peg_definitions'):
-            analysis_request['peg_definitions'] = request['peg_definitions']
-        
-        # 프롬프트 제한 설정
-        analysis_request['max_prompt_tokens'] = request.get('max_prompt_tokens', DEFAULT_MAX_PROMPT_TOKENS)
-        analysis_request['max_prompt_chars'] = request.get('max_prompt_chars', DEFAULT_MAX_PROMPT_CHARS)
-        
+
+        analysis_request = AnalysisRequest.from_dict(enriched_request)
+        request_dict = analysis_request.to_dict()
+
         self.logger.info(
             "요청 형식 변환 완료: 필드수=%d, 요약=%s",
-            len(analysis_request),
+            len(request_dict),
             {
-                "table": analysis_request.get('table'),
-                "columns_keys": list(analysis_request.get('columns', {}).keys()),
-                "filters": self._sanitize_for_logging(analysis_request.get('filters', {})),
-                "selected_pegs": analysis_request.get('selected_pegs'),
+                "table": request_dict.get("table"),
+                "columns_keys": list(request_dict.get("columns", {}).keys()),
+                "filters": self._sanitize_for_logging({
+                    key: request_dict.get(key)
+                    for key in ("ne", "cellid", "host")
+                    if request_dict.get(key) is not None
+                }),
+                "selected_pegs": request_dict.get("selected_pegs"),
             },
         )
-        return analysis_request
+
+        return request_dict
     
+    def _build_backend_payload(self, analysis_result: dict, analysis_request: dict) -> dict:
+        """백엔드 POST 호출에 사용할 페이로드를 구성한다."""
+
+        if not isinstance(analysis_result, dict):
+            return {"analysis_result": analysis_result}
+
+        payload: dict[str, Any] = analysis_result.copy()
+
+        request_context = {
+            "n_minus_1": analysis_request.get("n_minus_1"),
+            "n": analysis_request.get("n"),
+            "filters": self._sanitize_for_logging(analysis_request.get("filters", {})),
+            "analysis_type": analysis_request.get("analysis_type"),
+            "selected_pegs": analysis_request.get("selected_pegs"),
+        }
+
+        payload.setdefault("analysis_type", analysis_request.get("analysis_type"))
+        payload.setdefault("request_context", request_context)
+
+        return payload
+
     def _create_analysis_service(self) -> AnalysisService:
         """
         AnalysisService 인스턴스 생성 (의존성 주입)
@@ -1399,6 +1382,29 @@ class MCPHandler:
                 analysis_result.get('status') if isinstance(analysis_result, dict) else None,
                 list(analysis_result.keys()) if isinstance(analysis_result, dict) else type(analysis_result).__name__,
             )
+
+            backend_url = analysis_request.get('backend_url')
+            if backend_url:
+                self.logger.info("4.5단계: 백엔드 업로드 실행")
+                backend_payload = self._build_backend_payload(analysis_result, analysis_request)
+                self.logger.debug(
+                    "백엔드 업로드 페이로드 키: %s",
+                    list(backend_payload.keys()) if isinstance(backend_payload, dict) else type(backend_payload).__name__,
+                )
+                backend_response = post_results_to_backend(backend_url, backend_payload)
+                if isinstance(analysis_result, dict):
+                    analysis_result = analysis_result.copy()
+                    analysis_result['backend_response'] = backend_response
+                else:
+                    analysis_result = {
+                        "status": "success",
+                        "raw_result": analysis_result,
+                        "backend_response": backend_response,
+                    }
+                self.logger.info(
+                    "백엔드 업로드 완료: 응답 요약=%s",
+                    self._sanitize_for_logging(backend_response) if backend_response else None,
+                )
             
             # 5단계: 응답 형식 변환
             self.logger.info("5단계: MCP 응답 형식 변환")

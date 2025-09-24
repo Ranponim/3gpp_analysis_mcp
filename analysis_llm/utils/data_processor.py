@@ -129,7 +129,7 @@ class DataProcessor:
         self.logger = logging.getLogger(__name__ + ".DataProcessor")
 
         # 처리 단계 정의
-        self.processing_steps = ["data_merging", "change_calculation", "llm_integration", "result_normalization"]
+        self.processing_steps = ["change_calculation", "llm_integration", "result_normalization"]
 
         self.logger.info("DataProcessor 초기화 완료")
 
@@ -141,117 +141,6 @@ class DataProcessor:
             "supported_formats": ["pandas.DataFrame", "Dict[str, float]"],
             "output_model": "AnalyzedPEGResult",
         }
-
-    def _merge_peg_data(
-        self, n_minus_1_data: Dict[str, float], n_data: Dict[str, float]
-    ) -> Dict[str, Dict[str, Optional[float]]]:
-        """
-        N-1과 N 기간 PEG 데이터 병합
-
-        Args:
-            n_minus_1_data (Dict[str, float]): N-1 기간 PEG 데이터
-            n_data (Dict[str, float]): N 기간 PEG 데이터
-
-        Returns:
-            Dict[str, Dict[str, Optional[float]]]: 병합된 데이터
-            {peg_name: {'n_minus_1_value': float, 'n_value': float}}
-
-        Raises:
-            DataProcessingError: 병합 실패 시
-        """
-        self.logger.debug("_merge_peg_data() 호출: 데이터 병합 시작")
-
-        try:
-            # 모든 고유 PEG 이름 수집
-            all_peg_names = set(n_minus_1_data.keys()) | set(n_data.keys())
-
-            merged_data = {}
-
-            for peg_name in all_peg_names:
-                merged_data[peg_name] = {
-                    "n_minus_1_value": n_minus_1_data.get(peg_name),
-                    "n_value": n_data.get(peg_name),
-                }
-
-            self.logger.info(
-                "데이터 병합 완료: %d개 PEG (N-1: %d개, N: %d개)", len(merged_data), len(n_minus_1_data), len(n_data)
-            )
-
-            return merged_data
-
-        except Exception as e:
-            raise DataProcessingError(
-                f"PEG 데이터 병합 실패: {e}",
-                processing_step="data_merging",
-                data_context={
-                    "n_minus_1_pegs": len(n_minus_1_data),
-                    "n_pegs": len(n_data),
-                    "total_unique_pegs": len(set(n_minus_1_data.keys()) | set(n_data.keys())),
-                },
-            ) from e
-
-    def _calculate_change_rates(self, merged_data: Dict[str, Dict[str, Optional[float]]]) -> List[AnalyzedPEGResult]:
-        """
-        변화율 계산 및 AnalyzedPEGResult 생성
-
-        Args:
-            merged_data (Dict): 병합된 PEG 데이터
-
-        Returns:
-            List[AnalyzedPEGResult]: 분석된 PEG 결과 리스트
-
-        Raises:
-            DataProcessingError: 변화율 계산 실패 시
-        """
-        self.logger.debug("_calculate_change_rates() 호출: 변화율 계산 시작")
-
-        try:
-            results = []
-
-            for peg_name, values in merged_data.items():
-                n_minus_1_value = values["n_minus_1_value"]
-                n_value = values["n_value"]
-
-                # 절대 변화량 계산
-                if n_minus_1_value is not None and n_value is not None:
-                    absolute_change = n_value - n_minus_1_value
-
-                    # 백분율 변화율 계산 (0으로 나누기 방지)
-                    if n_minus_1_value != 0:
-                        percentage_change = (absolute_change / n_minus_1_value) * 100
-                    else:
-                        percentage_change = None  # 0으로 나누기 불가
-                        self.logger.warning("PEG '%s': N-1 값이 0이어서 백분율 계산 불가", peg_name)
-                else:
-                    absolute_change = None
-                    percentage_change = None
-                    self.logger.warning(
-                        "PEG '%s': 불완전한 데이터 (N-1: %s, N: %s)", peg_name, n_minus_1_value, n_value
-                    )
-
-                # AnalyzedPEGResult 생성
-                result = AnalyzedPEGResult(
-                    peg_name=peg_name,
-                    n_minus_1_value=n_minus_1_value,
-                    n_value=n_value,
-                    absolute_change=absolute_change,
-                    percentage_change=percentage_change,
-                )
-
-                results.append(result)
-
-            # 결과를 PEG 이름으로 정렬
-            results.sort(key=lambda x: x.peg_name)
-
-            self.logger.info("변화율 계산 완료: %d개 PEG 결과", len(results))
-            return results
-
-        except Exception as e:
-            raise DataProcessingError(
-                f"변화율 계산 실패: {e}",
-                processing_step="change_calculation",
-                data_context={"merged_pegs": len(merged_data)},
-            ) from e
 
     def _integrate_llm_analysis(
         self, peg_results: List[AnalyzedPEGResult], llm_analysis_results: Optional[Dict[str, str]] = None
@@ -302,44 +191,6 @@ class DataProcessor:
                 data_context={"peg_count": len(peg_results), "llm_keys": len(llm_analysis_results)},
             ) from e
 
-    def _dataframe_to_dict(self, df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
-        """
-        pandas DataFrame을 딕셔너리로 변환
-
-        Args:
-            df (pd.DataFrame): 처리된 PEG DataFrame
-
-        Returns:
-            Dict[str, Dict[str, float]]: {period: {peg_name: avg_value}}
-        """
-        self.logger.debug("_dataframe_to_dict() 호출: DataFrame 변환")
-
-        if df.empty:
-            return {"N-1": {}, "N": {}}
-
-        try:
-            # 기간별로 그룹화
-            result = {"N-1": {}, "N": {}}
-
-            for _, row in df.iterrows():
-                period = row["period"]
-                peg_name = row["peg_name"]
-                avg_value = row["avg_value"]
-
-                if period in result:
-                    result[period][peg_name] = avg_value
-
-            self.logger.info("DataFrame 변환 완료: N-1=%d개, N=%d개 PEG", len(result["N-1"]), len(result["N"]))
-
-            return result
-
-        except Exception as e:
-            raise DataProcessingError(
-                f"DataFrame 변환 실패: {e}",
-                processing_step="data_merging",
-                data_context={"df_shape": df.shape, "df_columns": list(df.columns)},
-            ) from e
-
     def process_data(
         self, processed_df: pd.DataFrame, llm_analysis_results: Optional[Dict[str, Any]] = None
     ) -> List[AnalyzedPEGResult]:
@@ -359,32 +210,67 @@ class DataProcessor:
         self.logger.info("process_data() 호출: 데이터 처리 워크플로우 시작")
 
         try:
-            # 1단계: DataFrame을 딕셔너리로 변환
-            self.logger.info("1단계: DataFrame 변환")
-            period_data = self._dataframe_to_dict(processed_df)
+            if processed_df.empty:
+                self.logger.info("처리된 DataFrame이 비어 있습니다 - 분석 결과가 없습니다")
+                return []
 
-            # 2단계: N-1과 N 데이터 병합
-            self.logger.info("2단계: 데이터 병합")
-            merged_data = self._merge_peg_data(n_minus_1_data=period_data["N-1"], n_data=period_data["N"])
+            self.logger.info("1단계: 변화율 계산 및 구조화")
 
-            # 3단계: 변화율 계산
-            self.logger.info("3단계: 변화율 계산")
-            peg_results = self._calculate_change_rates(merged_data)
+            change_map = processed_df.groupby("peg_name")["change_pct"].first().to_dict()
 
-            # 4단계: LLM 분석 통합
-            self.logger.info("4단계: LLM 분석 통합")
+            pivot_df = (
+                processed_df.pivot(index="peg_name", columns="period", values="avg_value")
+                .rename(columns={"N-1": "n_minus_1", "N": "n"})
+            )
 
-            # LLM 결과에서 PEG별 분석 추출
-            llm_peg_analysis = {}
+            pivot_df = pivot_df.where(pivot_df.notna(), None)
+
+            results: List[AnalyzedPEGResult] = []
+
+            for peg_name, row in pivot_df.iterrows():
+                n_minus_1_value = row.get("n_minus_1")
+                n_value = row.get("n")
+
+                absolute_change: Optional[float] = None
+                percentage_change: Optional[float] = None
+
+                if n_minus_1_value is not None and n_value is not None:
+                    absolute_change = n_value - n_minus_1_value
+                    percentage_change = change_map.get(peg_name)
+                    if percentage_change is not None and pd.isna(percentage_change):
+                        percentage_change = None
+                else:
+                    self.logger.warning(
+                        "PEG '%s' 데이터 불완전 (N-1=%s, N=%s)", peg_name, n_minus_1_value, n_value
+                    )
+
+                results.append(
+                    AnalyzedPEGResult(
+                        peg_name=peg_name,
+                        n_minus_1_value=n_minus_1_value,
+                        n_value=n_value,
+                        absolute_change=absolute_change,
+                        percentage_change=percentage_change,
+                    )
+                )
+
+            results.sort(key=lambda x: x.peg_name)
+
+            self.logger.info("2단계: LLM 분석 통합")
+            llm_peg_analysis: Dict[str, str] = {}
             if llm_analysis_results and isinstance(llm_analysis_results, dict):
-                # LLM 결과 구조 분석 (기존 main.py 형식)
-                if "summary" in llm_analysis_results:
-                    # 전체 요약을 모든 PEG에 적용 (간단한 버전)
+                peg_insights = llm_analysis_results.get("peg_insights")
+                if isinstance(peg_insights, dict):
+                    for peg_name, summary in peg_insights.items():
+                        if isinstance(summary, str) and summary.strip():
+                            llm_peg_analysis[peg_name] = summary
+                elif isinstance(llm_analysis_results.get("summary"), str):
                     summary = llm_analysis_results["summary"]
-                    for result in peg_results:
-                        llm_peg_analysis[result.peg_name] = summary[:200] + "..." if len(summary) > 200 else summary
+                    trimmed = summary[:200] + "..." if len(summary) > 200 else summary
+                    for result in results:
+                        llm_peg_analysis[result.peg_name] = trimmed
 
-            final_results = self._integrate_llm_analysis(peg_results, llm_peg_analysis)
+            final_results = self._integrate_llm_analysis(results, llm_peg_analysis)
 
             self.logger.info("데이터 처리 워크플로우 완료: %d개 PEG 결과", len(final_results))
             return final_results
