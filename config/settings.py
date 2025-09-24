@@ -244,7 +244,7 @@ class Settings(BaseSettings):
     
     # LLM 설정
     llm_provider: str = Field(default="openai", env="LLM_PROVIDER")
-    llm_api_key: SecretStr = Field(..., env="LLM_API_KEY")
+    llm_api_key: Optional[SecretStr] = Field(default=None, env="LLM_API_KEY")
     llm_model: str = Field(default="gpt-3.5-turbo", env="LLM_MODEL")
     llm_max_tokens: int = Field(default=2000, env="LLM_MAX_TOKENS")
     llm_temperature: float = Field(default=0.7, env="LLM_TEMPERATURE")
@@ -253,7 +253,7 @@ class Settings(BaseSettings):
     llm_retry_delay: float = Field(default=1.0, env="LLM_RETRY_DELAY")
     
     # 백엔드 서비스 설정
-    backend_service_url: HttpUrl = Field(..., env="BACKEND_SERVICE_URL")
+    backend_service_url: Optional[HttpUrl] = Field(default=None, env="BACKEND_SERVICE_URL")
     backend_timeout: int = Field(default=30, env="BACKEND_TIMEOUT")
     backend_auth_token: Optional[SecretStr] = Field(default=None, env="BACKEND_AUTH_TOKEN")
     
@@ -459,20 +459,28 @@ class Settings(BaseSettings):
     
     def validate_required_settings(self) -> None:
         """필수 설정 검증"""
-        required_checks = [
+        missing_settings = []
+
+        # 항상 필수인 설정
+        required_always = [
             (self.db_host, "DB_HOST"),
             (self.db_name, "DB_NAME"),
             (self.db_user, "DB_USER"),
-            (self.db_password.get_secret_value(), "DB_PASSWORD"),
-            (self.llm_api_key.get_secret_value(), "LLM_API_KEY"),
-            (str(self.backend_service_url), "BACKEND_SERVICE_URL"),
+            (self.db_password, "DB_PASSWORD"),
+            (self.backend_service_url, "BACKEND_SERVICE_URL"),
         ]
+
+        for value, name in required_always:
+            # SecretStr의 경우 get_secret_value()로 실제 값 확인 필요
+            val_to_check = value.get_secret_value() if isinstance(value, SecretStr) else value
+            if not val_to_check or str(val_to_check).strip() == '':
+                missing_settings.append(name)
         
-        missing_settings = []
-        for value, setting_name in required_checks:
-            if not value or str(value).strip() == '':
-                missing_settings.append(setting_name)
-        
+        # 조건부 필수: LLM 공급자가 'local'이 아닐 때만 API 키 확인
+        if self.llm_provider != 'local':
+            if not self.llm_api_key or not self.llm_api_key.get_secret_value():
+                missing_settings.append("LLM_API_KEY")
+
         if missing_settings:
             raise ValueError(
                 f"필수 환경 변수가 설정되지 않았습니다: {', '.join(missing_settings)}"

@@ -84,6 +84,22 @@ def get_app_settings():
         
         from config import get_settings
         _app_settings = get_settings()
+
+        # =================================================================
+        # >> DIAGNOSTIC LOGGING: 환경 변수 로딩 상태 확인
+        # =================================================================
+        logging.info("DIAGNOSTIC - Settings loaded. Checking critical values...")
+        logging.info(f"DIAGNOSTIC - LLM Provider: {_app_settings.llm_provider}")
+
+        # API 키는 존재 여부만 로그로 남겨서 유출 방지
+        if _app_settings.llm_api_key and _app_settings.llm_api_key.get_secret_value():
+            logging.info("DIAGNOSTIC - LLM API Key: [SET]")
+        else:
+            logging.info("DIAGNOSTIC - LLM API Key: [NOT SET]")
+
+        logging.info(f"DIAGNOSTIC - Backend Service URL: {_app_settings.backend_service_url}")
+        # =================================================================
+
     return _app_settings
 
 # ===========================================
