@@ -386,10 +386,22 @@ class AnalysisService:
             # 1단계: 요청 검증
             logger.info("1단계: 요청 검증")
             self.validate_request(request)
+            logger.debug(
+                "요청 필드 요약: keys=%s, backend_url=%s",
+                list(request.keys()),
+                bool(request.get("backend_url")),
+            )
 
             # 2단계: 시간 범위 파싱
             logger.info("2단계: 시간 범위 파싱")
             time_ranges = self.parse_time_ranges(request)
+            logger.debug(
+                "시간 범위 파싱 결과: N-1=%s~%s, N=%s~%s",
+                time_ranges[0],
+                time_ranges[1],
+                time_ranges[2],
+                time_ranges[3],
+            )
 
             # 3단계: PEG 데이터 처리 (PEGProcessingService 사용)
             if self.peg_processing_service:
@@ -411,6 +423,15 @@ class AnalysisService:
                     ),
                     "data_limit": request.get("data_limit"),
                 }
+                logger.debug(
+                    "PEGProcessingService 입력: table_config=%s, filters=%s",
+                    {
+                        "table": table_config["table"],
+                        "columns": list(table_config["columns"].keys()),
+                        "data_limit": table_config["data_limit"],
+                    },
+                    request.get("filters", {}),
+                )
 
                 # PEG 설정 준비
                 peg_config = {"aggregation_method": "mean", "derived_pegs": request.get("peg_definitions", {})}
@@ -456,6 +477,12 @@ class AnalysisService:
             analysis_type = request.get("analysis_type", "enhanced")
             selected_pegs = request.get("selected_pegs")
             enable_mock = request.get("enable_mock", False)
+            logger.debug(
+                "LLM 분석 호출 준비: analysis_type=%s, selected_pegs=%s, enable_mock=%s", 
+                analysis_type,
+                selected_pegs,
+                enable_mock,
+            )
 
             llm_result = self.llm_analysis_service.analyze_peg_data(
                 processed_df=processed_df,
@@ -499,6 +526,9 @@ class AnalysisService:
                 analyzed_peg_results = self.data_processor.process_data(
                     processed_df=processed_df, llm_analysis_results=llm_result
                 )
+                logger.debug(
+                    "DataProcessor 결과: analyzed_pegs=%d", len(analyzed_peg_results)
+                )
             except DataProcessingError as e:
                 raise AnalysisServiceError(
                     f"데이터 변환 실패: {e.message}", workflow_step="data_transformation", details=e.to_dict()
@@ -512,6 +542,7 @@ class AnalysisService:
                 analyzed_peg_results=analyzed_peg_results,
                 llm_result=llm_result,
             )
+            logger.debug("최종 결과 조립 완료: keys=%s", list(final_result.keys()))
 
             # 6.5단계: peg_analysis에 choi_judgement 병합(옵션)
             if choi_result_normalized is not None:

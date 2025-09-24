@@ -332,10 +332,20 @@ class PEGProcessingService:
             # 1단계: 시간 범위 검증
             logger.info("1단계: 시간 범위 검증")
             self._validate_time_ranges(time_ranges)
+            logger.debug(
+                "시간 범위 요약: N-1=%s~%s, N=%s~%s",
+                time_ranges[0],
+                time_ranges[1],
+                time_ranges[2],
+                time_ranges[3],
+            )
 
             # 2단계: 원시 데이터 조회
             logger.info("2단계: 원시 데이터 조회")
             n1_df, n_df = self._retrieve_raw_peg_data(time_ranges, table_config, filters)
+            logger.debug(
+                "원시 데이터 조회 결과: N-1 rows=%d, N rows=%d", len(n1_df), len(n_df)
+            )
 
             # 3단계: 원시 데이터 검증
             logger.info("3단계: 원시 데이터 검증")
@@ -344,6 +354,11 @@ class PEGProcessingService:
             # 4단계: PEGCalculator 처리
             logger.info("4단계: PEGCalculator 처리")
             processed_df = self._process_with_calculator(n1_df, n_df, peg_config or {})
+            logger.debug(
+                "PEGCalculator 처리 결과: 행수=%d, 컬럼=%s",
+                len(processed_df),
+                list(processed_df.columns),
+            )
 
             logger.info("PEG 데이터 처리 워크플로우 완료: %d행", len(processed_df))
             return processed_df

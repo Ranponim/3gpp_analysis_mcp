@@ -1131,6 +1131,33 @@ class MCPHandler:
         
         self.logger.info("MCPHandler 초기화 완료")
     
+    def _sanitize_for_logging(self, payload: dict | None) -> dict:
+        """민감정보를 마스킹한 사본을 반환하여 안전하게 로깅한다."""
+        if not isinstance(payload, dict):
+            return {}
+
+        redacted: dict[str, object] = {}
+        for key, value in payload.items():
+            lowered = str(key).lower()
+
+            if any(token in lowered for token in ["password", "secret", "token", "authorization"]):
+                redacted[key] = "***REDACTED***"
+                continue
+
+        if lowered in {"db", "database", "connection"}:
+                # DB 설정은 중첩 딕셔너리일 확률이 높으므로 재귀적으로 마스킹한다.
+                redacted[key] = self._sanitize_for_logging(value)
+                continue
+
+            if isinstance(value, dict):
+                redacted[key] = self._sanitize_for_logging(value)
+            elif isinstance(value, list):
+                redacted[key] = [self._sanitize_for_logging(item) if isinstance(item, dict) else item for item in value]
+            else:
+                redacted[key] = value
+
+        return redacted
+
     def _load_default_settings(self) -> None:
         """기본 설정 로드 (Configuration Manager 우선, 환경변수 폴백)"""
         try:
@@ -1165,7 +1192,11 @@ class MCPHandler:
         Raises:
             ValueError: 필수 필드 누락 또는 잘못된 형식
         """
-        self.logger.debug("_validate_basic_request() 호출: 기본 요청 검증 시작")
+        self.logger.debug(
+            "_validate_basic_request() 호출: 타입=%s, 키=%s",
+            type(request).__name__,
+            list(request.keys()) if isinstance(request, dict) else None,
+        )
         
         # 필수 필드 확인
         n1_text = request.get('n_minus_1') or request.get('n1')
@@ -1239,7 +1270,16 @@ class MCPHandler:
         analysis_request['max_prompt_tokens'] = request.get('max_prompt_tokens', DEFAULT_MAX_PROMPT_TOKENS)
         analysis_request['max_prompt_chars'] = request.get('max_prompt_chars', DEFAULT_MAX_PROMPT_CHARS)
         
-        self.logger.info("요청 형식 변환 완료: %d개 필드", len(analysis_request))
+        self.logger.info(
+            "요청 형식 변환 완료: 필드수=%d, 요약=%s",
+            len(analysis_request),
+            {
+                "table": analysis_request.get('table'),
+                "columns_keys": list(analysis_request.get('columns', {}).keys()),
+                "filters": self._sanitize_for_logging(analysis_request.get('filters', {})),
+                "selected_pegs": analysis_request.get('selected_pegs'),
+            },
+        )
         return analysis_request
     
     def _create_analysis_service(self) -> AnalysisService:
@@ -1311,7 +1351,13 @@ class MCPHandler:
             ValueError: 요청 검증 실패
             Exception: 처리 중 오류 발생
         """
-        self.logger.info("=" * 20 + " MCP Handler 요청 처리 시작 " + "=" * 20)
+        sanitized_request = self._sanitize_for_logging(request)
+        self.logger.info(
+            "%s MCP Handler 요청 처리 시작 | 키=%s | 요약=%s",
+            "=" * 10,
+            list(request.keys()) if isinstance(request, dict) else None,
+            sanitized_request,
+        )
         
         try:
             # 1단계: 기본 요청 검증
@@ -1321,6 +1367,18 @@ class MCPHandler:
             # 2단계: 요청 형식 변환
             self.logger.info("2단계: 요청 형식 변환")
             analysis_request = self._parse_request_to_analysis_format(request)
+            self.logger.debug(
+                "AnalysisService 전달용 요청 요약: %s",
+                {
+                    "backend_url": bool(analysis_request.get('backend_url')),
+                    "db_keys": list(analysis_request.get('db', {}).keys()),
+                    "time_ranges_text": {
+                        "n_minus_1": analysis_request.get('n_minus_1'),
+                        "n": analysis_request.get('n'),
+                    },
+                    "filters": self._sanitize_for_logging(analysis_request.get('filters', {})),
+                },
+            )
             
             # 3단계: AnalysisService 생성 (필요시)
             if not self.analysis_service:
@@ -1329,7 +1387,18 @@ class MCPHandler:
             
             # 4단계: 분석 실행
             self.logger.info("4단계: 분석 실행 (AnalysisService 위임)")
+            self.logger.debug(
+                "AnalysisService.perform_analysis 호출 준비 | backend_url=%s | table=%s | columns=%s",
+                analysis_request.get('backend_url'),
+                analysis_request.get('table'),
+                analysis_request.get('columns'),
+            )
             analysis_result = self.analysis_service.perform_analysis(analysis_request)
+            self.logger.debug(
+                "AnalysisService 수행 완료: status=%s, keys=%s",
+                analysis_result.get('status') if isinstance(analysis_result, dict) else None,
+                list(analysis_result.keys()) if isinstance(analysis_result, dict) else type(analysis_result).__name__,
+            )
             
             # 5단계: 응답 형식 변환
             self.logger.info("5단계: MCP 응답 형식 변환")
