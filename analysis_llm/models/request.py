@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,15 +15,22 @@ from typing import Any, Dict, List, Optional, Union
 logger = logging.getLogger(__name__)
 
 
+_DEFAULT_DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+_DEFAULT_DB_PORT = int(os.getenv("DB_PORT", "5432"))
+_DEFAULT_DB_USER = os.getenv("DB_USER", "postgres")
+_DEFAULT_DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+_DEFAULT_DB_NAME = os.getenv("DB_NAME", "postgres")
+
+
 @dataclass
 class DatabaseConfig:
     """데이터베이스 연결 설정"""
 
-    host: str = "127.0.0.1"
-    port: int = 5432
-    user: str = "postgres"
-    password: str = ""
-    dbname: str = "postgres"
+    host: str = _DEFAULT_DB_HOST
+    port: int = _DEFAULT_DB_PORT
+    user: str = _DEFAULT_DB_USER
+    password: str = _DEFAULT_DB_PASSWORD
+    dbname: str = _DEFAULT_DB_NAME
 
     def __post_init__(self):
         """데이터베이스 설정 검증"""
@@ -33,7 +41,12 @@ class DatabaseConfig:
         if not self.dbname:
             raise ValueError("데이터베이스 이름은 필수입니다")
 
-        logger.debug("DatabaseConfig 생성: host=%s, port=%d, dbname=%s", self.host, self.port, self.dbname)
+        logger.debug(
+            "DatabaseConfig 생성: host=%s, port=%d, dbname=%s (환경변수 적용)",
+            self.host,
+            self.port,
+            self.dbname,
+        )
 
 
 @dataclass
