@@ -270,7 +270,12 @@ class PostgreSQLRepository(DatabaseRepository):
         except psycopg2.Error as e:
             raise DatabaseError(
                 "PostgreSQL 연결 실패",
-                details={"host": self.config["host"], "database": self.config["database"], "error": str(e)},
+                details={
+                    "host": self.config["host"],
+                    "database": self.config["database"],
+                    "error": str(e),
+                },
+                connection_info=self.get_connection_info(),
             ) from e
 
     def disconnect(self) -> None:
