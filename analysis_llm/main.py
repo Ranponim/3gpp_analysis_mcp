@@ -654,16 +654,16 @@ def get_db_connection(db: Dict[str, str]):
     logging.info("get_db_connection() 호출: DB 연결 시도")
     try:
         conn = psycopg2.connect(
-            host=db.get("host", os.getenv("DEFAULT_DB_HOST", "127.0.0.1")),
-            port=db.get("port", os.getenv("DEFAULT_DB_PORT", "5432")),
-            user=db.get("user", os.getenv("DEFAULT_DB_USER", "postgres")),
-            password=db.get("password", os.getenv("DEFAULT_DB_PASSWORD", "")),
-            dbname=db.get("dbname", os.getenv("DEFAULT_DB_NAME", "postgres")),
+            host=db.get("host", "127.0.0.1"),
+            port=db.get("port", "5432"),
+            user=db.get("user", "postgres"),
+            password=db.get("password", ""),
+            dbname=db.get("dbname", "postgres"),
         )
         # 민감정보(password)는 로그에 남기지 않는다
         logging.info("DB 연결 성공 (host=%s, dbname=%s)", 
-                    db.get("host", os.getenv("DEFAULT_DB_HOST", "127.0.0.1")), 
-                    db.get("dbname", os.getenv("DEFAULT_DB_NAME", "postgres")))
+                    db.get("host", "127.0.0.1"), 
+                    db.get("dbname", "postgres"))
         return conn
     except Exception as e:
         logging.exception("DB 연결 실패: %s", e)
@@ -1145,14 +1145,14 @@ class MCPHandler:
             }
             self.logger.debug("Configuration Manager에서 기본 설정 로드 완료")
         except Exception as e:
-            self.logger.warning("Configuration Manager 로딩 실패, 환경변수 사용: %s", e)
-            self.default_backend_url = os.getenv('DEFAULT_BACKEND_URL', 'http://165.213.69.30:8000/api/analysis/results/')
+            self.logger.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
+            self.default_backend_url = 'http://165.213.69.30:8000/api/analysis/results/'
             self.default_db = {
-                "host": os.getenv('DEFAULT_DB_HOST', '127.0.0.1'),
-                "port": int(os.getenv('DEFAULT_DB_PORT', '5432')),
-                "user": os.getenv('DEFAULT_DB_USER', 'postgres'),
-                "password": os.getenv('DEFAULT_DB_PASSWORD', ''),
-                "dbname": os.getenv('DEFAULT_DB_NAME', 'postgres')
+                "host": "127.0.0.1",
+                "port": 5432,
+                "user": "postgres",
+                "password": "",
+                "dbname": "postgres"
             }
     
     def _validate_basic_request(self, request: dict) -> None:
@@ -1208,14 +1208,14 @@ class MCPHandler:
         analysis_request['db'] = request.get('db', self.default_db)
         
         # 테이블 및 컬럼 설정
-        analysis_request['table'] = request.get('table') or os.getenv('DEFAULT_TABLE', 'summary')
+        analysis_request['table'] = request.get('table') or 'summary'
         analysis_request['columns'] = request.get('columns', {
-            "time": os.getenv('DEFAULT_TIME_COLUMN', 'datetime'),
-            "peg_name": os.getenv('DEFAULT_PEG_COLUMN', 'peg_name'),
-            "value": os.getenv('DEFAULT_VALUE_COLUMN', 'value'),
-            "ne": os.getenv('DEFAULT_NE_COLUMN', 'ne'),
-            "cellid": os.getenv('DEFAULT_CELL_COLUMN', 'cellid'),
-            "host": os.getenv('DEFAULT_HOST_COLUMN', 'host')
+            "time": 'datetime',
+            "peg_name": 'peg_name',
+            "value": 'value',
+            "ne": 'ne',
+            "cellid": 'cellid',
+            "host": 'host'
         })
         
         # 필터 설정
@@ -1415,18 +1415,18 @@ def _analyze_cell_performance_logic(request: dict) -> dict:
             raise ValueError("'n_minus_1'와 'n' 시간 범위를 모두 제공해야 합니다.")
 
         output_dir = request.get('output_dir', os.path.abspath('./analysis_output'))
-        # 백엔드 업로드 URL: 요청값 > Configuration Manager > 환경변수 > 기본값 순으로 우선순위 적용
+        # 백엔드 업로드 URL: 요청값 > Configuration Manager > 기본값 순으로 우선순위 적용
         try:
             settings = get_app_settings()
             default_backend_url = str(settings.backend_service_url)
             logging.debug("Configuration Manager에서 백엔드 URL 로드: %s", default_backend_url)
         except Exception as e:
-            logging.warning("Configuration Manager 로딩 실패, 환경변수 직접 사용: %s", e)
-            default_backend_url = os.getenv('DEFAULT_BACKEND_URL', 'http://165.213.69.30:8000/api/analysis/results/')
+            logging.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
+            default_backend_url = 'http://165.213.69.30:8000/api/analysis/results/'
         
         backend_url = request.get('backend_url') or default_backend_url
 
-        # DB 설정: 요청값 > Configuration Manager > 환경변수 > 기본값 순으로 우선순위 적용
+        # DB 설정: 요청값 > Configuration Manager > 기본값 순으로 우선순위 적용
         try:
             settings = get_app_settings()
             default_db = {
@@ -1438,26 +1438,26 @@ def _analyze_cell_performance_logic(request: dict) -> dict:
             }
             logging.debug("Configuration Manager에서 DB 기본값 로드")
         except Exception as e:
-            logging.warning("Configuration Manager 로딩 실패, 환경변수 직접 사용: %s", e)
+            logging.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
             default_db = {
-            "host": os.getenv('DEFAULT_DB_HOST', '127.0.0.1'),
-            "port": int(os.getenv('DEFAULT_DB_PORT', '5432')),
-            "user": os.getenv('DEFAULT_DB_USER', 'postgres'),
-            "password": os.getenv('DEFAULT_DB_PASSWORD', ''),
-            "dbname": os.getenv('DEFAULT_DB_NAME', 'postgres')
+                "host": "127.0.0.1",
+                "port": 5432,
+                "user": "postgres",
+                "password": "",
+                "dbname": "postgres"
             }
         
         db = request.get('db', default_db)
         
-        # 테이블 및 컬럼 설정: 요청값 > 환경변수 > 기본값
-        table = request.get('table') or os.getenv('DEFAULT_TABLE', 'summary')
+        # 테이블 및 컬럼 설정: 요청값 > 기본값
+        table = request.get('table') or 'summary'
         columns = request.get('columns', {
-            "time": os.getenv('DEFAULT_TIME_COLUMN', 'datetime'),
-            "peg_name": os.getenv('DEFAULT_PEG_COLUMN', 'peg_name'),
-            "value": os.getenv('DEFAULT_VALUE_COLUMN', 'value'),
-            "ne": os.getenv('DEFAULT_NE_COLUMN', 'ne'),
-            "cellid": os.getenv('DEFAULT_CELL_COLUMN', 'cellid'),
-            "host": os.getenv('DEFAULT_HOST_COLUMN', 'host')
+            "time": 'datetime',
+            "peg_name": 'peg_name',
+            "value": 'value',
+            "ne": 'ne',
+            "cellid": 'cellid',
+            "host": 'host'
         })
 
         # 파라미터 요약 로그: 민감정보는 기록하지 않음

@@ -467,7 +467,10 @@ class AnalysisService:
             )
 
             # 4.5단계: Choi Deterministic 판정 (옵션)
-            use_choi = bool(request.get("use_choi", False))
+            # 요청 파라미터 > 환경변수 > 기본값 순으로 우선순위 적용
+            from config.settings import get_settings
+            settings = get_settings()
+            use_choi = bool(request.get("use_choi", settings.peg_use_choi))
             choi_result_normalized = None
             if use_choi:
                 logger.info("4.5단계: Choi Deterministic 판정 실행")

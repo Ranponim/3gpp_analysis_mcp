@@ -19,7 +19,7 @@ Usage:
 
 from __future__ import annotations
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 
 from pydantic import BaseModel, Field, SecretStr, HttpUrl, validator, model_validator
@@ -91,21 +91,21 @@ class DatabaseConfig(BaseModel):
 
 class LLMConfig(BaseModel):
     """LLM (Large Language Model) 설정"""
-    
+
     # 기본 LLM 제공업체 설정
     provider: str = Field(default="openai", env="LLM_PROVIDER", description="LLM 제공업체")
-    api_key: SecretStr = Field(..., env="LLM_API_KEY", description="LLM API 키")
+    api_key: Optional[SecretStr] = Field(default=None, env="LLM_API_KEY", description="LLM API 키")
     model: str = Field(default="gpt-3.5-turbo", env="LLM_MODEL", description="사용할 모델")
-    
+
     # API 요청 설정
     max_tokens: int = Field(default=2000, env="LLM_MAX_TOKENS", description="최대 토큰 수")
     temperature: float = Field(default=0.7, env="LLM_TEMPERATURE", description="생성 온도")
     timeout: int = Field(default=60, env="LLM_TIMEOUT", description="API 타임아웃(초)")
-    
+
     # 재시도 설정
     max_retries: int = Field(default=3, env="LLM_MAX_RETRIES", description="최대 재시도 횟수")
     retry_delay: float = Field(default=1.0, env="LLM_RETRY_DELAY", description="재시도 지연(초)")
-    
+
     @validator('provider')
     def validate_provider(cls, v):
         """LLM 제공업체 검증"""
@@ -113,13 +113,20 @@ class LLMConfig(BaseModel):
         if v.lower() not in valid_providers:
             raise ValueError(f"provider must be one of {valid_providers}")
         return v.lower()
-    
+
     @validator('temperature')
     def validate_temperature(cls, v):
         """생성 온도 검증"""
         if not 0.0 <= v <= 2.0:
             raise ValueError("temperature must be between 0.0 and 2.0")
         return v
+
+    @model_validator(mode='after')
+    def validate_api_key_requirement(self):
+        """API 키 요구사항 검증"""
+        if self.provider != 'local' and not self.api_key:
+            raise ValueError(f"API 키가 필요합니다. provider가 '{self.provider}'일 때는 LLM_API_KEY 환경변수를 설정해야 합니다.")
+        return self
 
 
 class BackendConfig(BaseModel):
@@ -244,7 +251,7 @@ class Settings(BaseSettings):
     
     # LLM 설정
     llm_provider: str = Field(default="openai", env="LLM_PROVIDER")
-    llm_api_key: SecretStr = Field(..., env="LLM_API_KEY")
+    llm_api_key: Optional[SecretStr] = Field(default=None, env="LLM_API_KEY")
     llm_model: str = Field(default="gpt-3.5-turbo", env="LLM_MODEL")
     llm_max_tokens: int = Field(default=2000, env="LLM_MAX_TOKENS")
     llm_temperature: float = Field(default=0.7, env="LLM_TEMPERATURE")
@@ -269,6 +276,7 @@ class Settings(BaseSettings):
     peg_enable_derived: bool = Field(default=True, env="PEG_ENABLE_DERIVED")
     peg_default_time_window: str = Field(default="1h", env="PEG_DEFAULT_TIME_WINDOW")
     peg_max_formula_complexity: int = Field(default=100, env="PEG_MAX_FORMULA_COMPLEXITY")
+    peg_use_choi: bool = Field(default=False, env="PEG_USE_CHOI")
     
     # 로깅 설정
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
@@ -347,12 +355,19 @@ class Settings(BaseSettings):
             if self.app_debug:
                 import warnings
                 warnings.warn("Debug mode is enabled in production environment")
-            
+
             # 프로덕션에서는 강력한 비밀번호 권장
             if len(self.db_password.get_secret_value()) < 8:
                 import warnings
                 warnings.warn("Database password should be at least 8 characters in production")
-        
+
+        return self
+
+    @model_validator(mode='after')
+    def validate_llm_api_key_requirement(self):
+        """LLM API 키 요구사항 검증"""
+        if self.llm_provider != 'local' and not self.llm_api_key:
+            raise ValueError(f"API 키가 필요합니다. provider가 '{self.llm_provider}'일 때는 LLM_API_KEY 환경변수를 설정해야 합니다.")
         return self
     
     def __init__(self, **kwargs):
@@ -464,20 +479,23 @@ class Settings(BaseSettings):
             (self.db_name, "DB_NAME"),
             (self.db_user, "DB_USER"),
             (self.db_password.get_secret_value(), "DB_PASSWORD"),
-            (self.llm_api_key.get_secret_value(), "LLM_API_KEY"),
             (str(self.backend_service_url), "BACKEND_SERVICE_URL"),
         ]
-        
+
+        # local provider가 아닐 때만 LLM API 키 검증
+        if self.llm_provider != 'local':
+            required_checks.append((self.llm_api_key.get_secret_value(), "LLM_API_KEY"))
+
         missing_settings = []
         for value, setting_name in required_checks:
             if not value or str(value).strip() == '':
                 missing_settings.append(setting_name)
-        
+
         if missing_settings:
             raise ValueError(
                 f"필수 환경 변수가 설정되지 않았습니다: {', '.join(missing_settings)}"
             )
-        
+
         logger.info("필수 설정 검증 완료")
     
     def to_dict(self, exclude_secrets: bool = True) -> Dict[str, Any]:

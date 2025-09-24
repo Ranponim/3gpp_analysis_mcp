@@ -123,6 +123,14 @@ set DEFAULT_DB_NAME=postgres
 - `DEFAULT_CELL_COLUMN`: 셀 ID 컬럼명
 - `DEFAULT_HOST_COLUMN`: 호스트 컬럼명
 
+### PEG (Performance Event Group) 설정
+
+- `PEG_DEFAULT_AGGREGATION`: 기본 집계 방법 (기본값: average)
+- `PEG_ENABLE_DERIVED`: 파생 PEG 활성화 (기본값: true)
+- `PEG_DEFAULT_TIME_WINDOW`: 기본 시간 윈도우 (기본값: 1h)
+- `PEG_MAX_FORMULA_COMPLEXITY`: 최대 수식 복잡도 (기본값: 100)
+- `PEG_USE_CHOI`: Choi Deterministic 판정 알고리즘 사용 여부 (기본값: false)
+
 ### 프롬프트 설정
 
 - `DEFAULT_MAX_PROMPT_TOKENS`: 최대 프롬프트 토큰 수
