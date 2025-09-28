@@ -1205,11 +1205,28 @@ class MCPHandler:
         try:
             settings = get_app_settings()
             self.default_backend_url = str(settings.backend_service_url)
+            
+            # 디버깅: db_password 상태 확인
+            self.logger.debug("db_password 타입: %s", type(settings.db_password))
+            self.logger.debug("db_password 값: %s", settings.db_password)
+            
+            # 안전한 password 처리
+            db_password = ""
+            if settings.db_password is not None:
+                try:
+                    db_password = settings.db_password.get_secret_value()
+                    self.logger.debug("db_password 성공적으로 읽음: 길이=%d", len(db_password))
+                except Exception as e:
+                    self.logger.warning("db_password.get_secret_value() 실패, 빈 문자열 사용: %s", e)
+                    db_password = ""
+            else:
+                self.logger.warning("settings.db_password가 None입니다!")
+            
             self.default_db = {
                 "host": settings.db_host,
                 "port": settings.db_port,
                 "user": settings.db_user,
-                "password": settings.db_password.get_secret_value(),
+                "password": db_password,
                 "dbname": settings.db_name
             }
             self.logger.debug("Configuration Manager에서 기본 설정 로드 완료")
@@ -1545,11 +1562,28 @@ def _analyze_cell_performance_logic(request: dict) -> dict:
         # DB 설정: 요청값 > Configuration Manager > 기본값 순으로 우선순위 적용
         try:
             settings = get_app_settings()
+            
+            # 디버깅: db_password 상태 확인
+            logging.debug("db_password 타입: %s", type(settings.db_password))
+            logging.debug("db_password 값: %s", settings.db_password)
+            
+            # 안전한 password 처리
+            db_password = ""
+            if settings.db_password is not None:
+                try:
+                    db_password = settings.db_password.get_secret_value()
+                    logging.debug("db_password 성공적으로 읽음: 길이=%d", len(db_password))
+                except Exception as e:
+                    logging.warning("db_password.get_secret_value() 실패, 빈 문자열 사용: %s", e)
+                    db_password = ""
+            else:
+                logging.warning("settings.db_password가 None입니다!")
+            
             default_db = {
                 "host": settings.db_host,
                 "port": settings.db_port,
                 "user": settings.db_user,
-                "password": settings.db_password.get_secret_value(),
+                "password": db_password,
                 "dbname": settings.db_name
             }
             logging.debug("Configuration Manager에서 DB 기본값 로드")
