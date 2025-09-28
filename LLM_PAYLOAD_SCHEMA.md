@@ -119,3 +119,5 @@
 - **GET `/api/analysis/results/{id}`**: 단일 분석 결과 상세 조회 (MongoDB)
 - **PUT `/api/analysis/results/{id}`**: 분석 결과 업데이트
 - **DELETE `/api/analysis/results/{id}`**: 분석 결과 삭제
+
+

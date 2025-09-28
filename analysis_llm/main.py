@@ -739,13 +739,35 @@ def fetch_cell_averages_for_period(
             "집계 SQL 실행: table=%s, time_col=%s, peg_col=%s, value_col=%s, ne_col=%s, cell_col=%s, host_col=%s",
             table, time_col, peg_col, value_col, ne_col, cell_col, columns.get("host", "host"),
         )
+        logging.info("실행할 SQL 쿼리: %s", sql)
+        logging.info("SQL 파라미터: %s", params)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
+        
         # 조회 결과를 DataFrame으로 변환 (비어있을 수 있음)
         df = pd.DataFrame(rows, columns=["peg_name", "avg_value"]) if rows else pd.DataFrame(columns=["peg_name", "avg_value"]) 
         df["period"] = period_label
+        
+        # 상세 로깅 추가
         logging.info("fetch_cell_averages_for_period() 건수: %d (period=%s)", len(df), period_label)
+        
+        if len(df) == 0:
+            logging.warning("⚠️ %s 기간에 데이터가 조회되지 않았습니다! SQL: %s", period_label, sql)
+            logging.warning("⚠️ 파라미터: %s", params)
+        else:
+            # 실제 데이터 샘플 로깅 (처음 5개)
+            sample_data = df.head(5)
+            logging.info("%s 기간 데이터 샘플 (처음 5개):", period_label)
+            for _, row in sample_data.iterrows():
+                logging.info("  - %s: %.4f", row['peg_name'], row['avg_value'])
+            
+            # 전체 PEG 개수와 평균값 통계
+            unique_pegs = df['peg_name'].nunique()
+            avg_values = df['avg_value'].describe()
+            logging.info("%s 기간 통계: PEG 개수=%d, 평균값 범위=[%.4f~%.4f]", 
+                        period_label, unique_pegs, avg_values['min'], avg_values['max'])
+        
         return df
     except Exception as e:
         logging.exception("기간별 평균 집계 쿼리 실패: %s", e)
@@ -850,10 +872,29 @@ def process_and_analyze(n1_df: pd.DataFrame, n_df: pd.DataFrame) -> pd.DataFrame
     try:
         all_df = pd.concat([n1_df, n_df], ignore_index=True)
         logging.info("병합 데이터프레임 크기: %s행 x %s열", all_df.shape[0], all_df.shape[1])
-        pivot = all_df.pivot(index="peg_name", columns="period", values="avg_value").fillna(0)
+        pivot = all_df.pivot(index="peg_name", columns="period", values="avg_value")
         logging.info("피벗 결과 컬럼: %s", list(pivot.columns))
+        logging.info("피벗 결과 크기: %s행 x %s열", pivot.shape[0], pivot.shape[1])
+        
+        # N-1과 N 데이터 존재 여부 확인
         if "N-1" not in pivot.columns or "N" not in pivot.columns:
             raise ValueError("N-1 또는 N 데이터가 부족합니다. 시간 범위 또는 원본 데이터를 확인하세요.")
+        
+        # N-1 데이터가 실제로 존재하는지 확인
+        n1_data_count = pivot["N-1"].notna().sum() if "N-1" in pivot.columns else 0
+        n_data_count = pivot["N"].notna().sum() if "N" in pivot.columns else 0
+        logging.info("실제 데이터 존재 개수: N-1=%d개, N=%d개", n1_data_count, n_data_count)
+        
+        if n1_data_count == 0:
+            logging.warning("⚠️ N-1 기간에 실제 데이터가 없습니다! 시간 범위나 필터 조건을 확인하세요.")
+        
+        # NaN을 0으로 채우기 전에 로그 출력
+        n1_nan_count = pivot["N-1"].isna().sum() if "N-1" in pivot.columns else 0
+        n_nan_count = pivot["N"].isna().sum() if "N" in pivot.columns else 0
+        logging.info("NaN 데이터 개수 (0으로 채워질 예정): N-1=%d개, N=%d개", n1_nan_count, n_nan_count)
+        
+        # NaN을 0으로 채우기
+        pivot = pivot.fillna(0)
         # 명세 컬럼 구성
         out = pd.DataFrame({
             "peg_name": pivot.index,
@@ -1544,9 +1585,22 @@ def _analyze_cell_performance_logic(request: dict) -> dict:
         # 시간 범위 파싱 (새로운 TimeRangeParser 사용)
         time_parser = TimeRangeParser()
         try:
+            logging.info("시간 범위 파싱 시작: n1_text='%s', n_text='%s'", n1_text, n_text)
             n1_start, n1_end = time_parser.parse(n1_text)
             n_start, n_end = time_parser.parse(n_text)
-            logging.info("시간 범위: N-1(%s~%s), N(%s~%s)", n1_start, n1_end, n_start, n_end)
+            logging.info("시간 범위 파싱 성공: N-1(%s~%s), N(%s~%s)", n1_start, n1_end, n_start, n_end)
+            
+            # 시간 범위 유효성 검증
+            n1_duration = n1_end - n1_start
+            n_duration = n_end - n_start
+            logging.info("시간 범위 지속시간: N-1=%s, N=%s", n1_duration, n_duration)
+            
+            # 시간 범위가 너무 짧거나 이상한지 확인
+            if n1_duration.total_seconds() < 60:  # 1분 미만
+                logging.warning("⚠️ N-1 기간이 너무 짧습니다: %s", n1_duration)
+            if n_duration.total_seconds() < 60:  # 1분 미만
+                logging.warning("⚠️ N 기간이 너무 짧습니다: %s", n_duration)
+                
         except TimeParsingError as e:
             # TimeParsingError를 기존 형식의 ValueError로 변환하여 호환성 유지
             error_json = e.to_json_error()
