@@ -477,12 +477,21 @@ class PostgreSQLRepository(DatabaseRepository):
             host_col = columns.get('host') or columns.get('name') or 'name'
             relver_col = columns.get('rel_ver', 'rel_ver')
 
-            # SELECT ... FROM t CROSS JOIN LATERAL jsonb_each_text(...) 형태로 행 확장
+            # 두 단계 확장:
+            # 1) 최상위 인덱스/키를 펼침 (idx)
+            # 2) 객체면 내부 PEG를, 스칼라이면 (idx.key, idx.val)로 치환해 metric으로 펼침
+            #    peg_name은 객체일 때 'metric.key[idx.key]' 형식으로 만들어 파이프라인 변경 없이 차원 포함
+            peg_name_expr = (
+                "(CASE WHEN jsonb_typeof(idx.val) = 'object' "
+                "THEN (metric.key || '[' || idx.key || ']') "
+                "ELSE metric.key END) AS peg_name"
+            )
+
             select_parts: List[str] = [
                 f"t.{time_col} AS timestamp",
                 f"t.{family_col} AS family_name",
-                "kv.key AS peg_name",
-                "NULLIF(regexp_replace(kv.value, '[^0-9\\.\\-eE]', '', 'g'), '')::numeric AS value",
+                peg_name_expr,
+                "NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'), '')::numeric AS value",
             ]
 
             # 선택적 컬럼들 추가 (존재 시)
@@ -495,7 +504,10 @@ class PostgreSQLRepository(DatabaseRepository):
 
             query = (
                 f"SELECT {', '.join(select_parts)} FROM {table_name} t "
-                f"CROSS JOIN LATERAL jsonb_each_text(t.{values_col}) AS kv(key, value)"
+                f"CROSS JOIN LATERAL jsonb_each(t.{values_col}) AS idx(key, val) "
+                f"CROSS JOIN LATERAL jsonb_each_text("
+                f"CASE WHEN jsonb_typeof(idx.val) = 'object' THEN idx.val ELSE jsonb_build_object(idx.key, idx.val) END"
+                f") AS metric(key, value)"
             )
 
             # 시간 조건 (별칭 t.)
@@ -519,6 +531,10 @@ class PostgreSQLRepository(DatabaseRepository):
                         conditions.append(f"{qualified} = %({key})s")
                         params[key] = value
 
+            # 메타/비수치 값 제외 조건
+            conditions.append("metric.key <> 'index_name'")
+            conditions.append("NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'), '') <> ''")
+
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
@@ -526,7 +542,7 @@ class PostgreSQLRepository(DatabaseRepository):
             if limit and limit > 0:
                 query += f" LIMIT {limit}"
 
-            logger.info("fetch_peg_data(): JSONB 확장 모드 쿼리 구성 완료")
+            logger.info("fetch_peg_data(): JSONB 2단계 확장 모드(A안) 쿼리 구성 완료")
             return self.fetch_data(query, params)
 
         # 비-JSONB 레거시 스키마: 기존 경로 유지
