@@ -479,15 +479,16 @@ class AnalysisService:
                 # 테이블 설정 준비
                 table_config = {
                     "table": request.get("table", "summary"),
+                    # 새 스키마 기본 매핑 (datetime, family_name, ne_key, rel_ver, name, values)
                     "columns": request.get(
                         "columns",
                         {
                             "time": "datetime",
-                            "peg_name": "peg_name",
-                            "value": "value",
-                            "ne": "ne",
-                            "cellid": "cellid",
-                            "host": "host",
+                            "family_name": "family_name",
+                            "values": "values",
+                            "ne": "ne_key",
+                            "rel_ver": "rel_ver",
+                            "host": "name",
                         },
                     ),
                     "data_limit": request.get("data_limit"),

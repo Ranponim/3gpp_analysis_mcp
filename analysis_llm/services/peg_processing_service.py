@@ -160,15 +160,16 @@ class PEGProcessingService:
             n1_start, n1_end, n_start, n_end = time_ranges
 
             table_name = table_config.get("table", "summary")
+            # 새 스키마 기본 매핑 (datetime, family_name, ne_key, rel_ver, name, values)
             columns = table_config.get(
                 "columns",
                 {
                     "time": "datetime",
-                    "peg_name": "peg_name",
-                    "value": "value",
-                    "ne": "ne",
-                    "cellid": "cellid",
-                    "host": "host",
+                    "family_name": "family_name",
+                    "values": "values",
+                    "ne": "ne_key",
+                    "rel_ver": "rel_ver",
+                    "host": "name",
                 },
             )
             data_limit = table_config.get("data_limit")

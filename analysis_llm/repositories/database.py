@@ -461,7 +461,75 @@ class PostgreSQLRepository(DatabaseRepository):
         """
         logger.info("fetch_peg_data() 호출: table=%s, time_range=%s", table_name, time_range)
 
-        # 기본 SELECT 쿼리 구성
+        # JSONB 기반 스키마 여부 판별 (values/family_name 존재 시)
+        json_mode = ('values' in columns) or ('family_name' in columns)
+
+        # WHERE 조건 구성 공통
+        conditions: List[str] = []
+        params: Dict[str, Any] = {}
+        start_time, end_time = time_range
+
+        if json_mode:
+            time_col = columns.get('time', 'datetime')
+            values_col = columns.get('values', 'values')
+            family_col = columns.get('family_name', 'family_name')
+            ne_col = columns.get('ne') or columns.get('ne_key') or 'ne_key'
+            host_col = columns.get('host') or columns.get('name') or 'name'
+            relver_col = columns.get('rel_ver', 'rel_ver')
+
+            # SELECT ... FROM t CROSS JOIN LATERAL jsonb_each_text(...) 형태로 행 확장
+            select_parts: List[str] = [
+                f"t.{time_col} AS timestamp",
+                f"t.{family_col} AS family_name",
+                "kv.key AS peg_name",
+                "NULLIF(regexp_replace(kv.value, '[^0-9\\.\\-eE]', '', 'g'), '')::numeric AS value",
+            ]
+
+            # 선택적 컬럼들 추가 (존재 시)
+            if ne_col:
+                select_parts.append(f"t.{ne_col} AS ne")
+            if host_col:
+                select_parts.append(f"t.{host_col} AS host")
+            if relver_col:
+                select_parts.append(f"t.{relver_col} AS rel_ver")
+
+            query = (
+                f"SELECT {', '.join(select_parts)} FROM {table_name} t "
+                f"CROSS JOIN LATERAL jsonb_each_text(t.{values_col}) AS kv(key, value)"
+            )
+
+            # 시간 조건 (별칭 t.)
+            conditions.append(f"t.{time_col} BETWEEN %(start_time)s AND %(end_time)s")
+            params['start_time'] = start_time
+            params['end_time'] = end_time
+
+            # 추가 필터 (columns 매핑된 키만 허용, t. 접두사 적용)
+            if filters:
+                for key, value in filters.items():
+                    col_name = columns.get(key)
+                    if col_name is None or value is None:
+                        continue
+                    qualified = f"t.{col_name}"
+                    if isinstance(value, (list, tuple, set)) and value:
+                        placeholders = ",".join([f"%({key}_{i})s" for i, _ in enumerate(value)])
+                        conditions.append(f"{qualified} IN ({placeholders})")
+                        for i, v in enumerate(value):
+                            params[f"{key}_{i}"] = v
+                    else:
+                        conditions.append(f"{qualified} = %({key})s")
+                        params[key] = value
+
+            if conditions:
+                query += " WHERE " + " AND ".join(conditions)
+
+            query += f" ORDER BY t.{time_col}"
+            if limit and limit > 0:
+                query += f" LIMIT {limit}"
+
+            logger.info("fetch_peg_data(): JSONB 확장 모드 쿼리 구성 완료")
+            return self.fetch_data(query, params)
+
+        # 비-JSONB 레거시 스키마: 기존 경로 유지
         select_columns = [
             f"{columns['time']} as timestamp",
             f"{columns['peg_name']} as peg_name",
@@ -477,22 +545,24 @@ class PostgreSQLRepository(DatabaseRepository):
         # 쿼리 구성
         query = f"SELECT {', '.join(select_columns)} FROM {table_name}"
 
-        # WHERE 조건 구성
-        conditions = []
-        params = {}
-
         # 시간 범위 조건
-        start_time, end_time = time_range
         conditions.append(f"{columns['time']} BETWEEN %(start_time)s AND %(end_time)s")
         params["start_time"] = start_time
         params["end_time"] = end_time
 
-        # 추가 필터 조건
+        # 추가 필터 조건 (컬럼 매핑된 키만)
         if filters:
             for key, value in filters.items():
                 if key in columns and value is not None:
-                    conditions.append(f"{columns[key]} = %({key})s")
-                    params[key] = value
+                    col_name = columns[key]
+                    if isinstance(value, (list, tuple, set)) and value:
+                        placeholders = ",".join([f"%({key}_{i})s" for i, _ in enumerate(value)])
+                        conditions.append(f"{col_name} IN ({placeholders})")
+                        for i, v in enumerate(value):
+                            params[f"{key}_{i}"] = v
+                    else:
+                        conditions.append(f"{col_name} = %({key})s")
+                        params[key] = value
 
         # WHERE 절 추가
         if conditions:
