@@ -250,9 +250,7 @@ class PEGCalculator:
                     operand = _eval(node.operand)
                     return +float(operand) if isinstance(node.op, ast.UAdd) else -float(operand)
 
-                # Python 3.8+ 호환성 - ast.Num은 deprecated
-                # if isinstance(node, ast.Num):  # Python < 3.8 호환성
-                #     return float(node.n)
+                # ast.Num은 Python 3.8에서 deprecated되어 ast.Constant로 대체됨
 
                 if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
                     return float(node.value)

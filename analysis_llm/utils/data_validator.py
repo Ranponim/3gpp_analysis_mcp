@@ -733,22 +733,7 @@ class DataValidator:
 # 전역 검증기 인스턴스
 validator = DataValidator()
 
-# 편의 함수들
-def validate_and_preprocess(raw_data: Dict[str, Any]) -> ValidationReport:
-    """전역 검증기를 사용한 데이터 검증 및 전처리"""
-    return validator.validate_and_preprocess(raw_data)
-
-def validate_peg_definitions(peg_definitions: Dict[str, Any]) -> Dict[str, Any]:
-    """전역 검증기를 사용한 PEG 정의 검증"""
-    return validator.validate_peg_definitions(peg_definitions)
-
-def get_validation_summary() -> Dict[str, Any]:
-    """검증기 요약 정보 반환"""
-    return validator.get_validation_summary()
-
 # 모듈 초기화 로그
 logger.info("PEG 비교분석 데이터 검증 모듈이 성공적으로 로드되었습니다")
-
-
 
 
