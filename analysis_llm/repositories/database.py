@@ -575,7 +575,9 @@ class PostgreSQLRepository(DatabaseRepository):
                 f"t.{time_col} AS timestamp",
                 f"t.{family_col} AS family_name",
                 peg_name_expr,
-                "NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'), '')::numeric AS value",
+                # 안전 캐스팅: 정규식으로 유효한 숫자 형태만 numeric 캐스팅, 아니면 NULL
+                "CASE WHEN (regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g')) ~ '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$' "
+                "THEN (regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'))::numeric ELSE NULL END AS value",
             ]
 
             # 선택적 컬럼들 추가 (존재 시)
@@ -655,7 +657,10 @@ class PostgreSQLRepository(DatabaseRepository):
 
             # 메타/비수치 값 제외 조건
             conditions.append("metric.key <> 'index_name'")
-            conditions.append("NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'), '') <> ''")
+            # 값이 유효한 숫자 패턴일 때만 포함
+            conditions.append(
+                "(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g')) ~ '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$'"
+            )
 
             if conditions:
                 logger.debug("fetch_peg_data(): WHERE 구성 | %d개 조건", len(conditions))
