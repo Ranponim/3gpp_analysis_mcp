@@ -224,11 +224,11 @@ class PostgreSQLRepository(DatabaseRepository):
         except Exception as e:
             logger.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
             self.config = {
-                "host": os.getenv("DB_HOST", "localhost"),
-                "port": int(os.getenv("DB_PORT", "5432")),
-                "database": os.getenv("DB_NAME", "postgres"),
-                "user": os.getenv("DB_USER", "postgres"),
-                "password": os.getenv("DB_PASSWORD", ""),
+                "host": os.getenv("DB_HOST", "165.213.69.30"),
+                "port": int(os.getenv("DB_PORT", "5442")),
+                "database": os.getenv("DB_NAME", "pvt_db"),
+                "user": os.getenv("DB_USER", "testuser"),
+                "password": os.getenv("DB_PASSWORD", "1234qwer"),
                 "pool_size": int(os.getenv("DB_POOL_SIZE", "5")),
             }
 
@@ -324,7 +324,11 @@ class PostgreSQLRepository(DatabaseRepository):
         except psycopg2.Error as e:
             if connection:
                 connection.rollback()
-            raise DatabaseError("데이터베이스 연결 오류") from e
+            raise DatabaseError(
+                "데이터베이스 연결 오류",
+                details={"error": str(e)},
+                connection_info=self.get_connection_info(),
+            ) from e
 
         finally:
             if connection:
@@ -414,6 +418,8 @@ class PostgreSQLRepository(DatabaseRepository):
                     "params": params,
                     "error_code": e.pgcode if hasattr(e, "pgcode") else None,
                 },
+                query=query,
+                connection_info=self.get_connection_info(),
             ) from e
 
     def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None, commit: bool = True) -> int:
@@ -459,6 +465,8 @@ class PostgreSQLRepository(DatabaseRepository):
                     "params": params,
                     "error_code": e.pgcode if hasattr(e, "pgcode") else None,
                 },
+                query=query,
+                connection_info=self.get_connection_info(),
             ) from e
 
     def fetch_peg_data(
