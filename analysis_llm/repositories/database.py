@@ -408,6 +408,20 @@ class PostgreSQLRepository(DatabaseRepository):
                     )
                     return data
 
+        except DatabaseError as e:
+            # 연결 획득 단계에서 발생한 DatabaseError에 쿼리/파라미터/연결정보를 보강
+            error_msg = getattr(e, "message", "데이터베이스 오류")
+            logger.error("fetch_data(): 연결 오류 | %s", error_msg)
+            raise DatabaseError(
+                error_msg,
+                details={
+                    "original": getattr(e, "details", None),
+                    "query": (query or "")[:1000],
+                    "params": params,
+                },
+                query=query,
+                connection_info=self.get_connection_info(),
+            ) from e
         except psycopg2.Error as e:
             error_msg = f"데이터 조회 실패: {e}"
             logger.error(error_msg)
@@ -455,6 +469,20 @@ class PostgreSQLRepository(DatabaseRepository):
                     logger.info("execute_query(): 완료 | affected=%d, %.1fms", rowcount, elapsed)
                     return rowcount
 
+        except DatabaseError as e:
+            # 연결 획득 단계에서 발생한 DatabaseError에 쿼리/파라미터/연결정보를 보강
+            error_msg = getattr(e, "message", "데이터베이스 오류")
+            logger.error("execute_query(): 연결 오류 | %s", error_msg)
+            raise DatabaseError(
+                error_msg,
+                details={
+                    "original": getattr(e, "details", None),
+                    "query": (query or "")[:1000],
+                    "params": params,
+                },
+                query=query,
+                connection_info=self.get_connection_info(),
+            ) from e
         except psycopg2.Error as e:
             error_msg = f"쿼리 실행 실패: {e}"
             logger.error(error_msg)
