@@ -520,9 +520,23 @@ class PostgreSQLRepository(DatabaseRepository):
         """
         logger.info("fetch_peg_data(): 호출 | table=%s, time_range=%s, filters_keys=%s",
                     table_name, time_range, list((filters or {}).keys()))
+        # Columns 매핑 디버그 로그 (키/값과 JSONB 감지 결과 출력)
+        try:
+            logger.debug(
+                "fetch_peg_data(): columns keys=%s, values=%s",
+                list((columns or {}).keys()), list((columns or {}).values()),
+            )
+        except Exception:
+            logger.debug("fetch_peg_data(): columns 로깅 실패 (비정형 입력)")
 
         # JSONB 기반 스키마 여부 판별 (values/family_name 존재 시)
-        json_mode = ('values' in columns) or ('family_name' in columns)
+        json_mode = (
+            ('values' in (columns or {}))
+            or ('family_name' in (columns or {}))
+            or ('values' in list((columns or {}).values()))
+            or ('family_name' in list((columns or {}).values()))
+        )
+        logger.debug("fetch_peg_data(): JSONB 감지 결과 | json_mode=%s", json_mode)
 
         # WHERE 조건 구성 공통
         conditions: List[str] = []
