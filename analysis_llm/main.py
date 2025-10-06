@@ -1,44 +1,114 @@
 """
 =====================================================================================
-Cell 성능 LLM 분석기 (시간범위 입력 + PostgreSQL 집계 + 통합 분석 + HTML/백엔드 POST)
+Cell 성능 LLM 분석기 (MCP 서버 + 아키텍처 리팩토링 버전)
 =====================================================================================
 
 ## 📋 시스템 개요
-3GPP 이동통신망의 Cell 성능 데이터를 LLM을 활용하여 종합 분석하는 시스템입니다.
-PostgreSQL에서 PEG(Performance Event Group) 데이터를 집계하고, LLM을 통해 전문가 수준의 분석 결과를 제공합니다.
+3GPP 이동통신망의 Cell 성능 데이터를 LLM을 활용하여 종합 분석하는 MCP(Model Context Protocol) 서버입니다.
+Clean Architecture 패턴을 적용하여 Repository, Service, Presentation 계층으로 분리된 구조로 설계되었습니다.
+
+## 🏗️ 아키텍처 구조
+### Presentation Layer (MCPHandler)
+- MCP 요청/응답 처리 및 형식 변환
+- 요청 검증 및 오류 처리
+- AnalysisService로의 비즈니스 로직 위임
+
+### Service Layer (AnalysisService)
+- 핵심 비즈니스 로직 처리
+- PEG 데이터 처리 및 LLM 분석 조율
+- 의존성 주입을 통한 Repository 계층 활용
+
+### Repository Layer
+- PostgreSQLRepository: 데이터베이스 접근 및 쿼리 실행
+- LLMClient: LLM API 호출 및 응답 처리
+
+### Utility Layer
+- TimeRangeParser: 시간 범위 파싱
+- DataProcessor: 데이터 변환 및 처리
+- PEGCalculator: 파생 지표 계산
 
 ## 🔄 주요 처리 흐름
-1. **시간 범위 파싱**: 사용자 입력 시간 범위를 파싱하여 시작/종료 시점 추출
-2. **데이터베이스 조회**: PostgreSQL에서 지정된 기간의 PEG 데이터 집계
-3. **파생 PEG 계산**: 사용자 정의 수식을 이용한 파생 지표 계산
-4. **데이터 처리**: N-1과 N 기간 데이터 병합 및 변화율 계산
-5. **LLM 분석**: 전문가 수준의 성능 분석 및 권고사항 생성
-6. **결과 출력**: HTML 리포트 생성 및 백엔드 API로 결과 전송
+1. **MCP 요청 수신**: FastMCP를 통한 도구 호출 수신
+2. **요청 검증**: MCPHandler에서 기본 검증 수행
+3. **서비스 위임**: AnalysisService로 비즈니스 로직 처리 위임
+4. **데이터 처리**: Repository를 통한 데이터 조회 및 처리
+5. **LLM 분석**: 전문가 수준의 성능 분석 수행
+6. **응답 반환**: MCP 형식으로 결과 반환
 
 ## 🎯 핵심 기능
-- **통합 분석**: PEG 단위가 아닌 셀 단위 전체 데이터를 통합하여 종합 성능 평가
-- **특정 PEG 분석**: preference나 selected_pegs로 지정된 PEG만 별도 분석
-- **파생 PEG 지원**: peg_definitions로 (pegA/pegB)*100 같은 수식 정의
-- **환경변수 지원**: 모든 설정값을 환경변수로 관리 가능
-- **페일오버 지원**: LLM API 다중 엔드포인트 지원
+- **MCP 서버**: FastMCP 기반의 표준화된 도구 제공
+- **Clean Architecture**: 관심사 분리 및 의존성 주입 패턴
+- **PEG 비교분석**: 통계적 성능 비교 및 분석
+- **환경변수 지원**: Configuration Manager를 통한 설정 관리
+- **오류 처리**: 계층별 예외 처리 및 로깅
 
-## 📝 사용 예시 (MCP tool 호출 request 예):
+## 📝 MCP 도구 사용 예시
+
+### 1. Cell 성능 분석 (analyze_cell_performance_with_llm)
+// A안(JSONB 2단계 확장, peg_name = metric[key]) + DU/Cell 필터 예시
 {
-  "n_minus_1": "2025-07-01_00:00~2025-07-01_23:59",
-  "n": "2025-07-02_00:00~2025-07-02_23:59",
-  "output_dir": "./analysis_output",
-  "backend_url": "http://localhost:8000/api/analysis-result",
-  "db": {"host": "127.0.0.1", "port": 5432, "user": "postgres", "password": "pass", "dbname": "netperf"},
-  "table": "summary",
-  "columns": {"time": "datetime", "peg_name": "peg_name", "value": "value"},
-  "preference": "Random_access_preamble_count,Random_access_response",
+  "n_minus_1": "2025-01-01_09:00~2025-01-01_18:00",
+  "n": "2025-01-02_09:00~2025-01-02_18:00",
+  "table": "kpi_summary",
+  "columns": {
+    "time": "datetime",
+    "family_name": "family_name",
+    "values": "values",
+    "ne": "ne_key",
+    "rel_ver": "rel_ver",
+    "host": "name"
+  },
+  "filters": {
+    "ne": "420",            // DU 지정 (ne_key)
+    "cellid": "1100"        // CellIdentity 차원에서 1100만 제한
+  },
+  "parsing": {
+    "mode": "two_level",           // 최상위 인덱스 → 내부 PEG 2단계 확장
+    "peg_name_mode": "append_dim"   // peg_name = metric[key] (A안)
+  },
+  "selected_pegs": ["VoLTEDLVolume", "PaBiasModeTime(s)"],
   "peg_definitions": {
-    "telus_RACH_Success": "Random_access_preamble_count/Random_access_response*100"
+    "success_rate": "response_count/preamble_count*100"
+  }
+}
+
+// 동작 요약(A안)
+// - CellIdentity는 지정된 key(예: 1100)만 포함하여 peg_name=VoLTEDLVolume[1100] 형식으로 반환
+// - 그 외 index_name(QCI, BPU_ID, 또는 없음)은 항상 포함(무조건 파싱)
+// - value는 문자열에서 숫자만 추출 후 numeric 캐스팅됨
+
+### 2. PEG 비교분석 (analyze_peg_comparison)
+{
+  "analysis_id": "peg_analysis_001",
+  "raw_data": {
+    "stats": [
+      {
+        "kpi_name": "UL_throughput_avg",
+        "period": "N-1",
+        "avg": 45.2,
+        "cell_id": "cell_001"
+      }
+    ],
+    "peg_definitions": {
+      "UL_throughput_avg": {
+        "weight": 3,
+        "thresholds": {"high": 20.0, "medium": 10.0}
+      }
+    }
   }
 }
 
 ## 🔧 환경변수 설정
-자세한 환경변수 설정은 ENV_SETTINGS.md 파일을 참조하세요.
+Configuration Manager를 통해 중앙집중식 설정 관리:
+- 데이터베이스 연결 정보
+- LLM API 설정
+- 로깅 및 성능 튜닝 파라미터
+자세한 설정은 config/settings.py 및 ENV_SETTINGS.md 참조
+
+## 🧪 테스트 및 실행
+- End-to-End 테스트: `python main.py --e2e-test`
+- CLI 모드: `python main.py --request '{"n_minus_1": "...", "n": "..."}'`
+- MCP 서버: `python main.py` (기본 포트 8001)
 """
 
 from __future__ import annotations
@@ -74,7 +144,19 @@ from .utils import TimeParsingError, TimeRangeParser
 _app_settings = None
 
 def get_app_settings():
-    """애플리케이션 설정 인스턴스 반환"""
+    """
+    애플리케이션 설정 인스턴스 반환
+    
+    Configuration Manager를 통해 애플리케이션의 모든 설정을 중앙집중식으로 관리합니다.
+    지연 로딩 패턴을 사용하여 필요할 때만 설정을 로드합니다.
+    
+    Returns:
+        Settings: 애플리케이션 설정 객체
+            - 데이터베이스 연결 정보
+            - LLM API 설정
+            - 로깅 설정
+            - 기타 애플리케이션 설정
+    """
     global _app_settings
     if _app_settings is None:
         # 프로젝트 루트의 config 모듈 import
@@ -92,7 +174,20 @@ def get_app_settings():
 # ===========================================
 # LLM 프롬프트 관련 상한값들 - 메모리 및 성능 보호를 위한 설정
 def get_prompt_limits():
-    """프롬프트 제한값들을 설정에서 가져오기"""
+    """
+    프롬프트 제한값들을 설정에서 가져오기
+    
+    LLM 프롬프트의 크기 제한값들을 환경변수에서 읽어 반환합니다.
+    메모리 및 성능 보호를 위한 설정값들입니다.
+    
+    Returns:
+        dict: 프롬프트 제한값 딕셔너리
+            - max_prompt_tokens (int): 최대 토큰 수 (기본값: 24000)
+            - max_prompt_chars (int): 최대 문자 수 (기본값: 80000)
+            - max_specific_rows (int): 최대 행 수 (기본값: 500)
+            - max_raw_str (int): 최대 원시 문자열 길이 (기본값: 4000)
+            - max_raw_array (int): 최대 배열 크기 (기본값: 100)
+    """
     return {
         'max_prompt_tokens': int(os.getenv('DEFAULT_MAX_PROMPT_TOKENS', '24000')),
         'max_prompt_chars': int(os.getenv('DEFAULT_MAX_PROMPT_CHARS', '80000')),
@@ -143,13 +238,22 @@ except Exception as e:
 
 def create_http_session() -> requests.Session:
     """
-    재시도 로직과 타임아웃이 설정된 requests 세션을 생성하는 함수
+    재시도 로직과 타임아웃이 설정된 requests 세션을 생성
     
     LLM API 호출을 위한 안정적인 HTTP 세션을 생성합니다.
     자동 재시도, 백오프 전략, 타임아웃 설정이 포함되어 있습니다.
     
+    설정 항목:
+    - 재시도 횟수: LLM_RETRY_TOTAL 환경변수 (기본값: 3)
+    - 백오프 팩터: LLM_RETRY_BACKOFF 환경변수 (기본값: 1.0)
+    - 타임아웃: LLM_TIMEOUT 환경변수 (기본값: 180초)
+    - 재시도 대상 상태코드: 429, 500, 502, 503, 504
+    
     Returns:
         requests.Session: 설정된 HTTP 세션 객체
+        
+    Raises:
+        Exception: 세션 생성 중 오류 발생 시
     """
     logging.info("create_http_session() 호출: HTTP 세션 생성 시작")
     
@@ -237,9 +341,22 @@ class MCPHandler:
     """
     MCP 요청을 처리하는 Presentation Layer Handler
     
-    기존의 monolithic _analyze_cell_performance_logic()를 lean한 핸들러로 리팩토링
-    AnalysisService에 위임하여 실제 분석 로직을 처리하고,
-    MCP 응답 형식으로 변환하는 역할만 담당
+    Clean Architecture의 Presentation Layer 역할을 담당하며,
+    MCP 요청/응답의 형식 변환과 기본 검증을 수행합니다.
+    
+    주요 책임:
+    - MCP 요청 데이터의 형식 검증 및 변환
+    - AnalysisService로 비즈니스 로직 위임
+    - MCP 응답 형식으로 결과 변환
+    - 오류 처리 및 로깅
+    
+    의존성:
+    - AnalysisService: 핵심 비즈니스 로직 처리
+    - Configuration Manager: 기본 설정 관리
+    
+    사용 패턴:
+        with MCPHandler() as handler:
+            result = handler.handle_request(request_data)
     """
     
     def __init__(self, analysis_service: AnalysisService = None):
@@ -258,7 +375,18 @@ class MCPHandler:
         self.logger.info("MCPHandler 초기화 완료")
     
     def _sanitize_for_logging(self, payload: dict | None) -> dict:
-        """민감정보를 마스킹한 사본을 반환하여 안전하게 로깅한다."""
+        """
+        민감정보를 마스킹한 사본을 반환하여 안전하게 로깅
+        
+        데이터베이스 비밀번호, API 키 등 민감한 정보를 로그에 노출하지 않도록
+        마스킹 처리합니다. 중첩된 딕셔너리 구조도 재귀적으로 처리합니다.
+        
+        Args:
+            payload (dict | None): 로깅할 데이터 딕셔너리
+            
+        Returns:
+            dict: 민감정보가 마스킹된 딕셔너리 사본
+        """
         if not isinstance(payload, dict):
             return {}
 
@@ -285,7 +413,16 @@ class MCPHandler:
         return redacted
 
     def _load_default_settings(self) -> None:
-        """기본 설정 로드 (Configuration Manager 우선, 환경변수 폴백)"""
+        """
+        기본 설정 로드 (Configuration Manager 우선, 환경변수 폴백)
+        
+        애플리케이션의 기본 설정값들을 로드합니다.
+        Configuration Manager를 우선적으로 사용하고, 실패 시 환경변수로 폴백합니다.
+        
+        설정 항목:
+        - default_backend_url: 백엔드 API 엔드포인트
+        - default_db: 데이터베이스 연결 정보
+        """
         try:
             settings = get_app_settings()
             self.default_backend_url = str(settings.backend_service_url)
@@ -329,8 +466,12 @@ class MCPHandler:
         """
         기본 요청 검증
         
+        MCP 요청의 필수 필드와 기본 형식을 검증합니다.
+        
         Args:
             request (dict): MCP 요청 데이터
+                - n_minus_1 (str): N-1 기간 시간 범위 (필수)
+                - n (str): N 기간 시간 범위 (필수)
             
         Raises:
             ValueError: 필수 필드 누락 또는 잘못된 형식
@@ -355,7 +496,18 @@ class MCPHandler:
         self.logger.info("기본 요청 검증 통과: n_minus_1=%s, n=%s", n1_text, n_text)
     
     def _parse_request_to_analysis_format(self, request: dict) -> dict:
-        """MCP 요청을 표준 AnalysisRequest 스키마로 변환"""
+        """
+        MCP 요청을 표준 AnalysisRequest 스키마로 변환
+        
+        MCP 요청 형식을 AnalysisService가 이해할 수 있는 표준 형식으로 변환합니다.
+        기본값 설정 및 Pydantic 모델 검증을 수행합니다.
+        
+        Args:
+            request (dict): MCP 요청 데이터
+            
+        Returns:
+            dict: AnalysisRequest 형식으로 변환된 요청 데이터
+        """
         self.logger.debug("_parse_request_to_analysis_format() 호출: 요청 형식 변환")
 
         enriched_request = {
@@ -387,7 +539,18 @@ class MCPHandler:
         return request_dict
     
     def _build_backend_payload(self, analysis_result: dict, analysis_request: dict) -> dict:
-        """백엔드 POST 호출에 사용할 페이로드를 구성한다."""
+        """
+        백엔드 POST 호출에 사용할 페이로드를 구성
+        
+        분석 결과와 요청 컨텍스트를 결합하여 백엔드 API로 전송할 페이로드를 생성합니다.
+        
+        Args:
+            analysis_result (dict): AnalysisService의 분석 결과
+            analysis_request (dict): 원본 요청 데이터
+            
+        Returns:
+            dict: 백엔드 API 전송용 페이로드
+        """
 
         if not isinstance(analysis_result, dict):
             return {"analysis_result": analysis_result}
@@ -411,8 +574,13 @@ class MCPHandler:
         """
         AnalysisService 인스턴스 생성 (의존성 주입)
         
+        Repository 계층과 Service 계층을 의존성 주입 패턴으로 구성하여
+        AnalysisService 인스턴스를 생성합니다.
+        
         Returns:
             AnalysisService: 구성된 분석 서비스
+                - database_repository: PostgreSQLRepository
+                - llm_analysis_service: LLMAnalysisService (내부 생성)
         """
         self.logger.debug("_create_analysis_service() 호출: AnalysisService 생성")
         
@@ -435,11 +603,21 @@ class MCPHandler:
         """
         AnalysisService 결과를 MCP 형식으로 변환
         
+        AnalysisService의 결과를 MCP 클라이언트가 이해할 수 있는 표준 형식으로 변환합니다.
+        상태별 메시지 추가 및 필드 정리를 수행합니다.
+        
         Args:
             analysis_result (dict): AnalysisService 결과
+                - status: "success" 또는 "error"
+                - data: 분석 결과 데이터
+                - backend_response: 백엔드 전송 결과 (선택적)
             
         Returns:
             dict: MCP 호환 응답 형식
+                - status: 처리 상태
+                - message: 상태별 메시지
+                - data: 분석 결과 (성공 시)
+                - error: 오류 정보 (실패 시)
         """
         self.logger.debug("_format_response_for_mcp() 호출: 응답 형식 변환")
         
@@ -466,15 +644,36 @@ class MCPHandler:
         """
         MCP 요청 처리 메인 엔트리포인트
         
+        MCP 요청의 전체 라이프사이클을 관리합니다:
+        1. 요청 검증
+        2. 형식 변환
+        3. AnalysisService 위임
+        4. 백엔드 전송 (선택적)
+        5. 응답 형식 변환
+        
         Args:
             request (dict): MCP 요청 데이터
+                - n_minus_1 (str): N-1 기간 시간 범위
+                - n (str): N 기간 시간 범위
+                - table (str): 데이터베이스 테이블명
+                - columns (dict): 컬럼 매핑
+                - selected_pegs (list, optional): 선택된 PEG 목록
+                - peg_definitions (dict, optional): 파생 PEG 정의
+                - backend_url (str, optional): 백엔드 API URL
+                - db (dict, optional): 데이터베이스 설정
             
         Returns:
             dict: MCP 응답 데이터
-            
+                - status: "success" 또는 "error"
+                - message: 처리 결과 메시지
+                - data: 분석 결과 (성공 시)
+                - error_type: 오류 유형 (실패 시)
+                - details: 상세 오류 정보 (실패 시)
+                
         Raises:
             ValueError: 요청 검증 실패
-            Exception: 처리 중 오류 발생
+            AnalysisServiceError: 분석 서비스 오류
+            Exception: 예상치 못한 오류 발생
         """
         sanitized_request = self._sanitize_for_logging(request)
         self.logger.info(
@@ -588,17 +787,42 @@ class MCPHandler:
             }
     
     def close(self) -> None:
-        """리소스 정리"""
+        """
+        리소스 정리
+        
+        MCPHandler가 사용한 리소스들을 정리합니다.
+        주로 AnalysisService의 연결 종료를 담당합니다.
+        """
         if self.analysis_service:
             self.analysis_service.close()
         self.logger.info("MCPHandler 리소스 정리 완료")
     
     def __enter__(self):
-        """컨텍스트 매니저 진입"""
+        """
+        컨텍스트 매니저 진입
+        
+        with 문을 사용할 때 자동으로 호출됩니다.
+        
+        Returns:
+            MCPHandler: 자기 자신을 반환
+        """
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """컨텍스트 매니저 종료"""
+        """
+        컨텍스트 매니저 종료
+        
+        with 문 블록이 종료될 때 자동으로 호출됩니다.
+        리소스 정리를 수행합니다.
+        
+        Args:
+            exc_type: 예외 타입 (예외 발생 시)
+            exc_val: 예외 값 (예외 발생 시)
+            exc_tb: 예외 트레이스백 (예외 발생 시)
+            
+        Returns:
+            bool: False (예외를 다시 발생시킴)
+        """
         self.close()
         return False
 
@@ -608,9 +832,60 @@ class MCPHandler:
 @mcp.tool
 def analyze_cell_performance_with_llm(request: dict) -> dict:
     """
-    MCP 엔드포인트: 시간 범위 기반 통합 셀 성능 분석 실행
+    MCP 도구: 시간 범위 기반 통합 셀 성능 분석 실행
     
-    새로운 아키텍처: MCPHandler -> AnalysisService -> 각종 Repository/Service 패턴
+    Clean Architecture 패턴을 적용한 셀 성능 분석 도구입니다.
+    MCPHandler를 통해 요청을 처리하고 AnalysisService로 비즈니스 로직을 위임합니다.
+    
+    처리 과정:
+    1. MCPHandler가 요청 검증 및 형식 변환
+    2. AnalysisService가 핵심 분석 로직 수행
+    3. Repository 계층을 통한 데이터 처리
+    4. LLM을 활용한 전문가 수준 분석
+    5. MCP 형식으로 결과 반환
+    
+    Args:
+        request (dict): 분석 요청 데이터
+            - n_minus_1 (str): N-1 기간 시간 범위 (예: "2025-01-01_09:00~2025-01-01_18:00")
+            - n (str): N 기간 시간 범위 (예: "2025-01-02_09:00~2025-01-02_18:00")
+            - table (str): 데이터베이스 테이블명 (기본값: "summary")
+            - columns (dict): 컬럼 매핑 (예: {"time": "datetime", "peg_name": "peg_name", "value": "value"})
+            - selected_pegs (list, optional): 분석할 PEG 목록
+            - peg_definitions (dict, optional): 파생 PEG 정의 (예: {"success_rate": "response_count/preamble_count*100"})
+            - filters (dict, optional): 필터 조건 (ne, cellid, host 등)
+            - backend_url (str, optional): 백엔드 API URL
+            - db (dict, optional): 데이터베이스 연결 설정
+            - analysis_type (str, optional): 분석 타입 ("enhanced", "basic" 등)
+    
+    Returns:
+        dict: 분석 결과
+            - status (str): "success" 또는 "error"
+            - message (str): 처리 결과 메시지
+            - data (dict, optional): 분석 결과 데이터 (성공 시)
+                - llm_analysis: LLM 분석 결과
+                - peg_analysis: PEG 분석 결과
+                - data_summary: 데이터 요약
+            - error_type (str, optional): 오류 유형 (실패 시)
+            - details (dict, optional): 상세 오류 정보 (실패 시)
+    
+    Raises:
+        ValueError: 요청 검증 실패
+        AnalysisServiceError: 분석 서비스 오류
+        Exception: 예상치 못한 오류
+    
+    Example:
+        ```python
+        request = {
+            "n_minus_1": "2025-01-01_09:00~2025-01-01_18:00",
+            "n": "2025-01-02_09:00~2025-01-02_18:00",
+            "table": "summary",
+            "selected_pegs": ["preamble_count", "response_count"],
+            "peg_definitions": {
+                "success_rate": "response_count/preamble_count*100"
+            }
+        }
+        result = analyze_cell_performance_with_llm(request)
+        ```
     """
     # 새로운 MCPHandler 사용
     with MCPHandler() as handler:
@@ -620,14 +895,20 @@ def analyze_cell_performance_with_llm(request: dict) -> dict:
 @mcp.tool
 def analyze_peg_comparison(request: dict) -> dict:
     """
-    MCP 엔드포인트: PEG 비교분석 실행
+    MCP 도구: PEG 비교분석 실행
     
     N-1 기간과 N 기간의 PEG 성능 지표를 비교하여 통계적 분석을 수행합니다.
-    프론트엔드의 계산 로직을 MCP 서버로 이전하여 성능을 향상시킵니다.
+    Pydantic 모델을 사용한 검증과 PEGComparisonAnalyzer를 통한 비동기 분석을 지원합니다.
+    
+    처리 과정:
+    1. Pydantic 모델을 통한 요청 데이터 검증
+    2. PEGComparisonAnalyzer 인스턴스 생성
+    3. 비동기 분석 실행 (asyncio.run 사용)
+    4. 응답 형식 변환 및 반환
     
     Args:
         request (dict): PEG 비교분석 요청 데이터
-            - analysis_id (str): 분석 고유 식별자
+            - analysis_id (str, optional): 분석 고유 식별자 (기본값: "default_analysis_id")
             - raw_data (dict): 원시 KPI 데이터
                 - stats (list): KPI 통계 데이터 리스트
                     - kpi_name (str): KPI 이름
@@ -645,18 +926,26 @@ def analyze_peg_comparison(request: dict) -> dict:
     Returns:
         dict: PEG 비교분석 결과
             - success (bool): 성공 여부
-            - data (dict): 분석 결과 데이터
+            - data (dict, optional): 분석 결과 데이터 (성공 시)
                 - analysis_id (str): 분석 ID
                 - peg_comparison_results (list): PEG별 비교 결과
                 - summary (dict): 전체 요약 통계
                 - analysis_metadata (dict): 분석 메타데이터
-            - error (dict, optional): 오류 정보
+            - error (dict, optional): 오류 정보 (실패 시)
+                - code (str): 오류 코드
+                - message (str): 오류 메시지
+                - details (str): 상세 오류 정보
             - processing_time (float): 처리 시간 (초)
             - algorithm_version (str): 사용된 알고리즘 버전
             - cached (bool): 캐시 사용 여부
     
+    Raises:
+        ValueError: 요청 데이터 검증 실패
+        Exception: 예상치 못한 오류 발생
+    
     Example:
-        {
+        ```python
+        request = {
             "analysis_id": "peg_analysis_001",
             "raw_data": {
                 "stats": [
@@ -681,10 +970,12 @@ def analyze_peg_comparison(request: dict) -> dict:
                 }
             },
             "options": {
-                "include_metadata": true,
+                "include_metadata": True,
                 "algorithm_version": "v2.1.0"
             }
         }
+        result = analyze_peg_comparison(request)
+        ```
     """
     logger = logging.getLogger(__name__ + '.peg_comparison')
     logger.info("=" * 20 + " PEG 비교분석 MCP 요청 처리 시작 " + "=" * 20)
@@ -806,8 +1097,24 @@ def initialize_integrated_components():
     """
     모든 컴포넌트를 의존성 주입으로 통합 초기화
     
+    Clean Architecture 패턴에 따라 모든 계층의 컴포넌트를 의존성 주입으로 구성합니다.
+    테스트 및 개발 환경에서 전체 시스템의 통합을 검증하는 데 사용됩니다.
+    
+    초기화 순서:
+    1. Configuration Manager 및 로깅 설정
+    2. Core Utilities (TimeRangeParser, PEGCalculator 등)
+    3. Repository Layer (PostgreSQLRepository, LLMClient)
+    4. Service Layer (PEGProcessingService, LLMAnalysisService, AnalysisService)
+    5. Presentation Layer (MCPHandler)
+    
     Returns:
         tuple: (mcp_handler, analysis_service, logger) 통합된 컴포넌트들
+            - mcp_handler (MCPHandler): 프레젠테이션 계층 핸들러
+            - analysis_service (AnalysisService): 비즈니스 로직 서비스
+            - logger (Logger): 통합 로거
+    
+    Raises:
+        Exception: 컴포넌트 초기화 실패 시 발생
     """
     logger = logging.getLogger(__name__ + '.integration')
     logger.info("=== 통합 컴포넌트 초기화 시작 ===")
@@ -896,7 +1203,26 @@ def run_end_to_end_test():
     """
     End-to-End 통합 테스트 실행
     
-    모든 컴포넌트가 올바르게 통합되었는지 검증합니다.
+    전체 시스템의 통합성을 검증하는 종합 테스트를 수행합니다.
+    모든 계층의 컴포넌트가 올바르게 연동되어 정상적으로 작동하는지 확인합니다.
+    
+    테스트 과정:
+    1. 통합 컴포넌트 초기화
+    2. 샘플 MCP 요청 정의 및 실행
+    3. 응답 검증 (성공/실패 케이스 모두)
+    4. 컴포넌트 상태 검증
+    5. 성능 측정 및 결과 보고
+    
+    Returns:
+        dict: 테스트 결과
+            - status (str): "success", "error", "test_error"
+            - message (str): 테스트 결과 메시지
+            - data (dict, optional): 분석 결과 데이터 (성공 시)
+            - error_type (str, optional): 오류 유형 (실패 시)
+            - processing_time (float): 처리 시간
+    
+    Raises:
+        Exception: 테스트 실행 중 치명적 오류 발생 시
     """
     logger = logging.getLogger(__name__ + '.e2e_test')
     logger.info("=== End-to-End 통합 테스트 시작 ===")
@@ -1023,6 +1349,14 @@ def run_end_to_end_test():
 
 
 if __name__ == '__main__':
+    """
+    메인 실행 진입점
+    
+    다양한 실행 모드를 지원합니다:
+    1. End-to-End 테스트 모드: `python main.py --e2e-test`
+    2. CLI 모드: `python main.py --request '{"n_minus_1": "...", "n": "..."}'`
+    3. MCP 서버 모드: `python main.py` (기본)
+    """
     import sys
 
     # End-to-End 테스트 모드

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 # 임시로 절대 import 사용 (나중에 패키지 구조 정리 시 수정)
 import sys
@@ -247,10 +248,14 @@ class PostgreSQLRepository(DatabaseRepository):
     def connect(self) -> None:
         """데이터베이스 연결 풀 초기화"""
         if self._is_connected:
-            logger.debug("이미 연결된 상태입니다")
+            logger.debug("connect(): 이미 연결된 상태 - host=%s, db=%s, pool_size=%s",
+                         self.config.get("host"), self.config.get("database"), self.config.get("pool_size"))
             return
 
         try:
+            logger.info("connect(): 연결 풀 생성 시작 | host=%s, port=%s, db=%s, pool_size=%s",
+                        self.config.get("host"), self.config.get("port"), self.config.get("database"), self.config.get("pool_size"))
+            t0 = time.perf_counter()
             # 연결 풀 생성
             self._pool = psycopg2.pool.SimpleConnectionPool(
                 minconn=1,
@@ -263,8 +268,10 @@ class PostgreSQLRepository(DatabaseRepository):
             )
 
             self._is_connected = True
+            elapsed = (time.perf_counter() - t0) * 1000
             logger.info(
-                "PostgreSQL 연결 풀 생성 완료: host=%s, pool_size=%d", self.config["host"], self.config["pool_size"]
+                "connect(): 연결 풀 생성 완료 | host=%s, db=%s, pool_size=%s, %.1fms",
+                self.config["host"], self.config["database"], self.config["pool_size"], elapsed
             )
 
         except psycopg2.Error as e:
@@ -281,14 +288,15 @@ class PostgreSQLRepository(DatabaseRepository):
     def disconnect(self) -> None:
         """데이터베이스 연결 풀 해제"""
         if not self._is_connected or not self._pool:
-            logger.debug("연결되지 않은 상태입니다")
+            logger.debug("disconnect(): 연결되지 않은 상태 - 무시")
             return
 
         try:
+            logger.info("disconnect(): 연결 풀 해제 시작")
             self._pool.closeall()
             self._pool = None
             self._is_connected = False
-            logger.info("PostgreSQL 연결 풀 해제 완료")
+            logger.info("disconnect(): 연결 풀 해제 완료")
 
         except Exception as e:
             logger.error("연결 풀 해제 중 오류: %s", e)
@@ -307,8 +315,10 @@ class PostgreSQLRepository(DatabaseRepository):
 
         connection = None
         try:
+            t0 = time.perf_counter()
             connection = self._pool.getconn()
-            logger.debug("연결 풀에서 연결 획득")
+            elapsed = (time.perf_counter() - t0) * 1000
+            logger.debug("get_connection(): 연결 획득 완료 (%.1fms)", elapsed)
             yield connection
 
         except psycopg2.Error as e:
@@ -319,7 +329,7 @@ class PostgreSQLRepository(DatabaseRepository):
         finally:
             if connection:
                 self._pool.putconn(connection)
-                logger.debug("연결 풀에 연결 반환")
+                logger.debug("get_connection(): 연결 반환 완료")
 
     def test_connection(self) -> bool:
         """연결 테스트"""
@@ -354,7 +364,11 @@ class PostgreSQLRepository(DatabaseRepository):
 
         기존 main.py의 데이터베이스 조회 로직을 모듈화한 것입니다.
         """
-        logger.debug("fetch_data() 호출: query=%s, params=%s", query[:100], params)
+        logger.debug(
+            "fetch_data(): 호출 | query_len=%d, preview=%s, params_keys=%s, table=%s, time_range=%s, limit=%s",
+            len(query or ""), (query or "")[:180].replace("\n", " "),
+            list((params or {}).keys()), table_name, time_range, limit
+        )
 
         if not self._is_connected:
             self.connect()
@@ -375,6 +389,7 @@ class PostgreSQLRepository(DatabaseRepository):
             with self.get_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                     # 쿼리 실행
+                    t0 = time.perf_counter()
                     cursor.execute(query, params or {})
 
                     # 결과 조회
@@ -382,8 +397,11 @@ class PostgreSQLRepository(DatabaseRepository):
 
                     # RealDictRow를 일반 딕셔너리로 변환
                     data = [dict(row) for row in results]
-
-                    logger.info("데이터 조회 완료: %d행", len(data))
+                    elapsed = (time.perf_counter() - t0) * 1000
+                    logger.info(
+                        "fetch_data(): 조회 완료 | rows=%d, %.1fms, params_keys=%s",
+                        len(data), elapsed, list((params or {}).keys())
+                    )
                     return data
 
         except psycopg2.Error as e:
@@ -404,7 +422,10 @@ class PostgreSQLRepository(DatabaseRepository):
 
         기존 main.py의 쿼리 실행 로직을 모듈화한 것입니다.
         """
-        logger.debug("execute_query() 호출: query=%s, commit=%s", query[:100], commit)
+        logger.debug(
+            "execute_query(): 호출 | query_len=%d, preview=%s, commit=%s, params_keys=%s",
+            len(query or ""), (query or "")[:180].replace("\n", " "), commit, list((params or {}).keys())
+        )
 
         if not self._is_connected:
             self.connect()
@@ -413,6 +434,7 @@ class PostgreSQLRepository(DatabaseRepository):
             with self.get_connection() as conn:
                 with conn.cursor() as cursor:
                     # 쿼리 실행
+                    t0 = time.perf_counter()
                     cursor.execute(query, params or {})
 
                     # 영향받은 행 수
@@ -423,7 +445,8 @@ class PostgreSQLRepository(DatabaseRepository):
                         conn.commit()
                         logger.debug("트랜잭션 커밋 완료")
 
-                    logger.info("쿼리 실행 완료: %d행 영향", rowcount)
+                    elapsed = (time.perf_counter() - t0) * 1000
+                    logger.info("execute_query(): 완료 | affected=%d, %.1fms", rowcount, elapsed)
                     return rowcount
 
         except psycopg2.Error as e:
@@ -459,7 +482,8 @@ class PostgreSQLRepository(DatabaseRepository):
         Returns:
             List[Dict[str, Any]]: PEG 데이터 목록
         """
-        logger.info("fetch_peg_data() 호출: table=%s, time_range=%s", table_name, time_range)
+        logger.info("fetch_peg_data(): 호출 | table=%s, time_range=%s, filters_keys=%s",
+                    table_name, time_range, list((filters or {}).keys()))
 
         # JSONB 기반 스키마 여부 판별 (values/family_name 존재 시)
         json_mode = ('values' in columns) or ('family_name' in columns)
@@ -476,6 +500,16 @@ class PostgreSQLRepository(DatabaseRepository):
             ne_col = columns.get('ne') or columns.get('ne_key') or 'ne_key'
             host_col = columns.get('host') or columns.get('name') or 'name'
             relver_col = columns.get('rel_ver', 'rel_ver')
+            # 차원(alias) 매핑: JSONB index_name → 필터 키
+            dimension_alias_map = {
+                'cellid': 'CellIdentity',
+                'qci': 'QCI',
+                'bpu_id': 'BPU_ID',
+            }
+            logger.debug(
+                "fetch_peg_data(): JSONB 모드 | cols={time:%s,family:%s,values:%s,ne:%s,host:%s,rel_ver:%s} | dims=%s",
+                time_col, family_col, values_col, ne_col, host_col, relver_col, dimension_alias_map
+            )
 
             # 두 단계 확장:
             # 1) 최상위 인덱스/키를 펼침 (idx)
@@ -509,17 +543,55 @@ class PostgreSQLRepository(DatabaseRepository):
                 f"CASE WHEN jsonb_typeof(idx.val) = 'object' THEN idx.val ELSE jsonb_build_object(idx.key, idx.val) END"
                 f") AS metric(key, value)"
             )
+            logger.debug("fetch_peg_data(): SELECT 구성 완료 | select_parts=%s", select_parts)
 
             # 시간 조건 (별칭 t.)
             conditions.append(f"t.{time_col} BETWEEN %(start_time)s AND %(end_time)s")
             params['start_time'] = start_time
             params['end_time'] = end_time
 
-            # 추가 필터 (columns 매핑된 키만 허용, t. 접두사 적용)
+            # 추가 필터
             if filters:
+                index_name_expr = f"jsonb_extract_path_text(t.{values_col}, 'index_name')"
+
+                # 1) 차원 필터(cellid/qci/bpu_id 등):
+                #    원칙 - 어떤 차원 필터가 와도 해당 index_name에는 key 조건을 적용하고,
+                #           그 외 index_name은 항상 포함(무조건 파싱)되도록 OR 그룹 구성
+                dim_filters = {k: v for k, v in filters.items() if k in dimension_alias_map and v is not None}
+                if dim_filters:
+                    logger.debug("fetch_peg_data(): 차원 필터 감지 | %s", {k: (v if isinstance(v, (list,tuple,set)) else [v]) for k,v in dim_filters.items()})
+                    per_dim_clauses: List[str] = []
+                    dim_in_names: List[str] = []
+                    for dim_key, dim_value in dim_filters.items():
+                        iname = dimension_alias_map[dim_key]
+                        dim_in_names.append(iname)
+                        pname_iname = f"{dim_key}_index_name"
+                        params[pname_iname] = iname
+                        if isinstance(dim_value, (list, tuple, set)) and dim_value:
+                            placeholders = ",".join([f"%({dim_key}_{i})s" for i, _ in enumerate(dim_value)])
+                            for i, v in enumerate(dim_value):
+                                params[f"{dim_key}_{i}"] = str(v)
+                            per_dim_clauses.append(f"( {index_name_expr} = %({pname_iname})s AND idx.key IN ({placeholders}) )")
+                        else:
+                            params[dim_key] = str(dim_value)
+                            per_dim_clauses.append(f"( {index_name_expr} = %({pname_iname})s AND idx.key = %({dim_key})s )")
+
+                    # others clause: index_name이 어떤 지정 iname에도 속하지 않거나 NULL인 경우 모두 포함
+                    other_names_placeholders = ",".join([f"%(dim_iname_{i})s" for i in range(len(dim_in_names))])
+                    for i, nm in enumerate(dim_in_names):
+                        params[f"dim_iname_{i}"] = nm
+                    others_clause = f"( {index_name_expr} IS NULL OR {index_name_expr} NOT IN ({other_names_placeholders}) )"
+
+                    clause_preview = " OR ".join(per_dim_clauses + ["..."])
+                    logger.debug("fetch_peg_data(): 차원 필터 WHERE 구성 | preview=%s", clause_preview[:160])
+                    conditions.append("( " + " OR ".join(per_dim_clauses + [others_clause]) + " )")
+
+                # 2) 테이블 컬럼 기반 필터 (columns 매핑된 키만 허용, t. 접두사 적용)
                 for key, value in filters.items():
+                    if value is None:
+                        continue
                     col_name = columns.get(key)
-                    if col_name is None or value is None:
+                    if not col_name:
                         continue
                     qualified = f"t.{col_name}"
                     if isinstance(value, (list, tuple, set)) and value:
@@ -536,13 +608,17 @@ class PostgreSQLRepository(DatabaseRepository):
             conditions.append("NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'), '') <> ''")
 
             if conditions:
+                logger.debug("fetch_peg_data(): WHERE 구성 | %d개 조건", len(conditions))
                 query += " WHERE " + " AND ".join(conditions)
 
             query += f" ORDER BY t.{time_col}"
             if limit and limit > 0:
                 query += f" LIMIT {limit}"
 
-            logger.info("fetch_peg_data(): JSONB 2단계 확장 모드(A안) 쿼리 구성 완료")
+            logger.info(
+                "fetch_peg_data(): JSONB 2단계 확장 모드(A안) 쿼리 구성 완료 | sql_len=%d, params_keys=%s",
+                len(query), list(params.keys())
+            )
             return self.fetch_data(query, params)
 
         # 비-JSONB 레거시 스키마: 기존 경로 유지
