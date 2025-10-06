@@ -20,7 +20,7 @@ _DEFAULT_DB_PORT = int(os.getenv("DB_PORT", "5432"))
 _DEFAULT_DB_USER = os.getenv("DB_USER", "postgres")
 _DEFAULT_DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 _DEFAULT_DB_NAME = os.getenv("DB_NAME", "postgres")
-_DEFAULT_TABLE = os.getenv("DB_TABLE", os.getenv("DEFAULT_TABLE", "summary"))
+_DEFAULT_TABLE = os.getenv("DB_TABLE") or "test_pmdata1"
 
 
 @dataclass
