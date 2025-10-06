@@ -125,10 +125,11 @@ class DatabaseError(AnalysisError):
         self.query = query
         self.connection_info = connection_info or {}
 
-        # 로깅: 데이터베이스 오류 상세 정보
+        # 로깅: 데이터베이스 오류 상세 정보 (details 포함)
         log_details = {
             "query": query[:100] + "..." if query and len(query) > 100 else query,
             "connection": connection_info,
+            "details": details,
         }
         logger.error("DatabaseError 발생: %s, 상세: %s", message, log_details)
 

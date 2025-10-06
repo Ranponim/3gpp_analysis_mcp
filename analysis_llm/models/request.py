@@ -20,6 +20,7 @@ _DEFAULT_DB_PORT = int(os.getenv("DB_PORT", "5432"))
 _DEFAULT_DB_USER = os.getenv("DB_USER", "postgres")
 _DEFAULT_DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 _DEFAULT_DB_NAME = os.getenv("DB_NAME", "postgres")
+_DEFAULT_TABLE = os.getenv("DB_TABLE", os.getenv("DEFAULT_TABLE", "summary"))
 
 
 @dataclass
@@ -53,7 +54,7 @@ class DatabaseConfig:
 class TableConfig:
     """테이블 및 컬럼 설정"""
 
-    table: str = "summary"
+    table: str = _DEFAULT_TABLE
     time_column: str = "datetime"
     peg_name_column: str = "peg_name"
     value_column: str = "value"
@@ -183,7 +184,7 @@ class AnalysisRequest:
         )
 
         # 테이블 설정
-        table = data.get("table", "summary")
+        table = data.get("table", _DEFAULT_TABLE)
         columns = data.get("columns", {})
         table_config = TableConfig(
             table=table,
