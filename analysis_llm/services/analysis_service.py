@@ -322,17 +322,15 @@ class AnalysisService:
             # 데이터베이스 설정 (기존 main.py 로직)
             request.get("db", {})
             table = request.get("table", _DEFAULT_TABLE)
-            columns = request.get(
-                "columns",
-                {
-                    "time": "datetime",
-                    "peg_name": "peg_name",
-                    "value": "value",
-                    "ne": "ne",
-                    "cellid": "cellid",
-                    "host": "host",
-                },
-            )
+            # columns는 MCP handler에서 원본 보존됨. 없을 때만 기본값 적용
+            columns = request.get("columns") or {
+                "time": "datetime",
+                "family_name": "family_name",
+                "values": "values",
+                "ne": "ne_key",
+                "rel_ver": "rel_ver",
+                "host": "name",
+            }
 
             # N-1 기간 데이터 조회
             logger.info("N-1 기간 데이터 조회: %s ~ %s", n1_start, n1_end)

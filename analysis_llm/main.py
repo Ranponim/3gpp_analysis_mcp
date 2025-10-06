@@ -521,6 +521,17 @@ class MCPHandler:
         analysis_request = AnalysisRequest.from_dict(enriched_request)
         request_dict = analysis_request.to_dict()
 
+        # 원본 요청의 columns가 존재하면 그대로 보존하여 JSONB 키(family_name, values) 누락을 방지
+        try:
+            if isinstance(request.get("columns"), dict) and request.get("columns"):
+                request_dict["columns"] = request["columns"]
+                self.logger.debug(
+                    "columns 보존: keys=%s",
+                    list(request_dict["columns"].keys()),
+                )
+        except Exception as e:
+            self.logger.warning("columns 보존 중 예외(무시): %s", e)
+
         self.logger.info(
             "요청 형식 변환 완료: 필드수=%d, 요약=%s",
             len(request_dict),

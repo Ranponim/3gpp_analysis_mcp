@@ -162,17 +162,15 @@ class PEGProcessingService:
 
             table_name = table_config.get("table", _DEFAULT_TABLE)
             # 새 스키마 기본 매핑 (datetime, family_name, ne_key, rel_ver, name, values)
-            columns = table_config.get(
-                "columns",
-                {
-                    "time": "datetime",
-                    "family_name": "family_name",
-                    "values": "values",
-                    "ne": "ne_key",
-                    "rel_ver": "rel_ver",
-                    "host": "name",
-                },
-            )
+            # 상위에서 보존된 columns를 우선 사용, 없으면 JSONB 기본 매핑 적용
+            columns = table_config.get("columns") or {
+                "time": "datetime",
+                "family_name": "family_name",
+                "values": "values",
+                "ne": "ne_key",
+                "rel_ver": "rel_ver",
+                "host": "name",
+            }
             data_limit = table_config.get("data_limit")
 
             # N-1 기간 데이터 조회
