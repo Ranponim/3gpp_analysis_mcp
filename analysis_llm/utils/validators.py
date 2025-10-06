@@ -17,6 +17,7 @@ import re
 from typing import Any, Dict, Optional, Union
 
 from ..exceptions import ValidationError
+from ..models.request import _DEFAULT_TABLE
 from .exceptions import TimeParsingError
 from .time_parser import TimeRangeParser
 
@@ -103,7 +104,7 @@ class RequestValidator:
         # 선택적 필드 기본값
         self.optional_field_defaults = {
             "output_dir": "./analysis_output",
-            "table": "summary",
+            "table": _DEFAULT_TABLE,
             "analysis_type": "enhanced",
             "enable_mock": False,
             "max_prompt_tokens": 8000,

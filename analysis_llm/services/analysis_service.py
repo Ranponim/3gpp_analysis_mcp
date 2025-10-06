@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Union
 import pandas as pd
 
 from ..exceptions import ServiceError
+from ..models.request import _DEFAULT_TABLE
 from ..repositories import DatabaseRepository
 from ..utils import AnalyzedPEGResult, DataProcessingError, DataProcessor, TimeParsingError, TimeRangeParser
 
@@ -320,7 +321,7 @@ class AnalysisService:
 
             # 데이터베이스 설정 (기존 main.py 로직)
             request.get("db", {})
-            table = request.get("table", "summary")
+            table = request.get("table", _DEFAULT_TABLE)
             columns = request.get(
                 "columns",
                 {
@@ -478,7 +479,7 @@ class AnalysisService:
 
                 # 테이블 설정 준비
                 table_config = {
-                    "table": request.get("table", "summary"),
+                    "table": request.get("table", _DEFAULT_TABLE),
                     # 새 스키마 기본 매핑 (datetime, family_name, ne_key, rel_ver, name, values)
                     "columns": request.get(
                         "columns",

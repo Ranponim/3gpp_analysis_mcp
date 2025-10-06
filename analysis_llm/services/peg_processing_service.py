@@ -16,6 +16,7 @@ import pandas as pd
 
 from ..exceptions import ServiceError
 from ..repositories import DatabaseRepository
+from ..models.request import _DEFAULT_TABLE
 from .peg_service import PEGCalculator
 
 # 로깅 설정
@@ -159,7 +160,7 @@ class PEGProcessingService:
         try:
             n1_start, n1_end, n_start, n_end = time_ranges
 
-            table_name = table_config.get("table", "summary")
+            table_name = table_config.get("table", _DEFAULT_TABLE)
             # 새 스키마 기본 매핑 (datetime, family_name, ne_key, rel_ver, name, values)
             columns = table_config.get(
                 "columns",
