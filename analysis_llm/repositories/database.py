@@ -575,9 +575,9 @@ class PostgreSQLRepository(DatabaseRepository):
                 f"t.{time_col} AS timestamp",
                 f"t.{family_col} AS family_name",
                 peg_name_expr,
-                # 안전 캐스팅: 정규식으로 유효한 숫자 형태만 numeric 캐스팅, 아니면 NULL
-                "CASE WHEN (regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g')) ~ '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$' "
-                "THEN (regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'))::numeric ELSE NULL END AS value",
+                # 안전 캐스팅: 유효한 숫자 패턴이며 길이가 과도하지 않을 때만 double precision 캐스팅
+                "CASE WHEN (cv.clean_val ~ '^[+-]?(?:\\\d+(?:\\.\\\d+)?|\\.\\\d+)(?:[eE][+-]?\\\d+)?$' AND length(cv.clean_val) <= 40) "
+                "THEN cv.clean_val::double precision ELSE NULL END AS value",
             ]
 
             # 선택적 컬럼들 추가 (존재 시)
@@ -593,7 +593,10 @@ class PostgreSQLRepository(DatabaseRepository):
                 f"CROSS JOIN LATERAL jsonb_each(t.{values_col}) AS idx(key, val) "
                 f"CROSS JOIN LATERAL jsonb_each_text("
                 f"CASE WHEN jsonb_typeof(idx.val) = 'object' THEN idx.val ELSE jsonb_build_object(idx.key, idx.val) END"
-                f") AS metric(key, value)"
+                f") AS metric(key, value) "
+                f"CROSS JOIN LATERAL ("
+                f"SELECT NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'),'') AS clean_val"
+                f") AS cv"
             )
             logger.debug("fetch_peg_data(): SELECT 구성 완료 | select_parts=%s", select_parts)
 
@@ -657,9 +660,9 @@ class PostgreSQLRepository(DatabaseRepository):
 
             # 메타/비수치 값 제외 조건
             conditions.append("metric.key <> 'index_name'")
-            # 값이 유효한 숫자 패턴일 때만 포함
+            # 값이 유효한 숫자 패턴이며 길이 제한을 만족할 때만 포함 (overflow 방지)
             conditions.append(
-                "(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g')) ~ '^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?$'"
+                "(cv.clean_val ~ '^[+-]?(?:\\\d+(?:\\.\\\d+)?|\\.\\\d+)(?:[eE][+-]?\\\d+)?$' AND length(cv.clean_val) <= 40)"
             )
 
             if conditions:
