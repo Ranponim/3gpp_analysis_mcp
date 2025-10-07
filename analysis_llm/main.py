@@ -579,6 +579,25 @@ class MCPHandler:
         payload.setdefault("analysis_type", analysis_request.get("analysis_type"))
         payload.setdefault("request_context", request_context)
 
+        # 백엔드 모델의 필수 필드인 ne_id와 cell_id 추가
+        filters = analysis_request.get("filters", {})
+        ne_id = filters.get("ne")
+        cell_id = filters.get("cellid")
+
+        # 값이 리스트일 경우 첫 번째 요소를 사용
+        if isinstance(ne_id, list) and ne_id:
+            ne_id = ne_id[0]
+        if isinstance(cell_id, list) and cell_id:
+            cell_id = cell_id[0]
+
+        # payload에 추가 (백엔드 스키마에 맞게 키 이름 변경)
+        payload["ne_id"] = ne_id or "unknown"
+        payload["cell_id"] = cell_id or "unknown"
+        
+        # analysis_date가 없는 경우 현재 시간으로 설정
+        if "analysis_date" not in payload:
+            payload["analysis_date"] = datetime.datetime.utcnow().isoformat()
+
         return payload
     
     def _convert_numpy_types(self, obj: Any) -> Any:
