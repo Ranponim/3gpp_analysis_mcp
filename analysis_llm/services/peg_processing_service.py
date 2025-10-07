@@ -277,10 +277,36 @@ class PEGProcessingService:
             if not combined_df.empty:
                 # pivot으로 N-1, N 기간을 컬럼으로 변환
                 pivot_df = combined_df.pivot(index="peg_name", columns="period", values="value").fillna(0)
+                
+                logger.debug(
+                    "pivot 결과: shape=%s, columns=%s, N-1_존재=%s, N_존재=%s",
+                    pivot_df.shape,
+                    list(pivot_df.columns),
+                    "N-1" in pivot_df.columns,
+                    "N" in pivot_df.columns
+                )
 
                 if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
+                    # N-1이 0인 경우 체크 (division by zero 방지)
+                    zero_n1_count = (pivot_df["N-1"] == 0).sum()
+                    if zero_n1_count > 0:
+                        logger.warning("N-1 값이 0인 PEG가 %d개 있습니다 (변화율 계산 시 0으로 처리)", zero_n1_count)
+                    
                     pivot_df["change_pct"] = ((pivot_df["N"] - pivot_df["N-1"]) / pivot_df["N-1"] * 100).fillna(0)
+                    
+                    # change_pct 통계 출력 (디버깅)
+                    non_zero_changes = (pivot_df["change_pct"] != 0).sum()
+                    if len(pivot_df) > 0:
+                        sample_pegs = pivot_df.head(5)
+                        logger.debug(
+                            "change_pct 계산 완료: 총=%d, 0이_아닌_값=%d개, 샘플_PEG=%s",
+                            len(pivot_df),
+                            non_zero_changes,
+                            [(idx, row["N-1"], row["N"], row["change_pct"]) 
+                             for idx, row in sample_pegs.iterrows()]
+                        )
                 else:
+                    logger.warning("pivot 결과에 N-1 또는 N 컬럼이 없습니다! change_pct를 0으로 설정")
                     pivot_df["change_pct"] = 0
 
                 # 최종 형태로 변환
@@ -292,6 +318,7 @@ class PEGProcessingService:
                     value_name="avg_value",
                 )
             else:
+                logger.warning("combined_df가 비어있습니다!")
                 processed_df = pd.DataFrame(columns=["peg_name", "period", "avg_value", "change_pct"])
 
             logger.info("PEGCalculator 처리 완료: %d행", len(processed_df))

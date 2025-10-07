@@ -140,6 +140,7 @@ class AnalysisRequest:
     n: str  # "yyyy-mm-dd_hh:mm~yyyy-mm-dd_hh:mm"
     output_dir: str = "./analysis_output"
     backend_url: Optional[str] = None
+    data_limit: Optional[int] = None  # 데이터 조회 개수 제한
     db_config: DatabaseConfig = field(default_factory=DatabaseConfig)
     table_config: TableConfig = field(default_factory=TableConfig)
     filter_config: FilterConfig = field(default_factory=FilterConfig)
@@ -172,6 +173,7 @@ class AnalysisRequest:
         n = data.get("n")
         output_dir = data.get("output_dir", "./analysis_output")
         backend_url = data.get("backend_url")
+        data_limit = data.get("data_limit")  # 데이터 조회 개수 제한
 
         # 데이터베이스 설정
         db_data = data.get("db") or {}
@@ -214,6 +216,7 @@ class AnalysisRequest:
             n=n,
             output_dir=output_dir,
             backend_url=backend_url,
+            data_limit=data_limit,
             db_config=db_config,
             table_config=table_config,
             filter_config=filter_config,
@@ -230,6 +233,7 @@ class AnalysisRequest:
             "n": self.n,
             "output_dir": self.output_dir,
             "backend_url": self.backend_url,
+            "data_limit": self.data_limit,
             "db": {
                 "host": self.db_config.host,
                 "port": self.db_config.port,

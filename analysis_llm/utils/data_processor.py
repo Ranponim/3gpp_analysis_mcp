@@ -216,7 +216,33 @@ class DataProcessor:
 
             self.logger.info("1단계: 변화율 계산 및 구조화")
 
+            # processed_df의 change_pct 컬럼 확인 (디버깅)
+            if "change_pct" in processed_df.columns:
+                unique_change_values = processed_df["change_pct"].unique()
+                non_zero_changes = processed_df[processed_df["change_pct"] != 0]["change_pct"].count()
+                self.logger.debug(
+                    "processed_df change_pct 분석: 고유값_개수=%d, 0이_아닌_값=%d, 샘플_값=%s",
+                    len(unique_change_values),
+                    non_zero_changes,
+                    unique_change_values[:10].tolist() if len(unique_change_values) > 0 else []
+                )
+            else:
+                self.logger.warning("processed_df에 change_pct 컬럼이 없습니다!")
+
             change_map = processed_df.groupby("peg_name")["change_pct"].first().to_dict()
+            
+            # change_map 통계 확인 (디버깅)
+            if change_map:
+                non_zero_in_map = sum(1 for v in change_map.values() if v != 0 and v is not None)
+                sample_items = list(change_map.items())[:5]
+                self.logger.debug(
+                    "change_map 생성: 총=%d개, 0이_아닌_값=%d개, 샘플=%s",
+                    len(change_map),
+                    non_zero_in_map,
+                    sample_items
+                )
+            else:
+                self.logger.warning("change_map이 비어있습니다!")
 
             pivot_df = (
                 processed_df.pivot(index="peg_name", columns="period", values="avg_value")

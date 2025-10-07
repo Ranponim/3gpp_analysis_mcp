@@ -580,6 +580,107 @@ class MCPHandler:
         payload.setdefault("request_context", request_context)
 
         return payload
+    
+    def _convert_numpy_types(self, obj: Any) -> Any:
+        """
+        numpy 타입을 Python 네이티브 타입으로 재귀적 변환
+        
+        JSON 직렬화를 위해 numpy.int64, numpy.float64 등을 
+        int, float로 변환합니다.
+        
+        Args:
+            obj: 변환할 객체
+            
+        Returns:
+            Python 네이티브 타입으로 변환된 객체
+        """
+        import numpy as np
+        
+        if isinstance(obj, dict):
+            return {key: self._convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._convert_numpy_types(item) for item in obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        else:
+            return obj
+    
+    def _post_to_backend(self, backend_url: str, payload: dict) -> dict:
+        """
+        백엔드에 분석 결과 POST 요청 전송
+        
+        Args:
+            backend_url (str): 백엔드 API URL
+            payload (dict): 전송할 페이로드
+            
+        Returns:
+            dict: 백엔드 응답
+            
+        Raises:
+            Exception: 백엔드 요청 실패 시
+        """
+        import requests
+        from config.settings import get_settings
+        
+        self.logger.info("_post_to_backend() 호출: url=%s", backend_url)
+        
+        try:
+            settings = get_settings()
+            timeout = settings.backend_timeout
+            
+            # numpy 타입 변환 (JSON 직렬화 에러 방지)
+            self.logger.debug("numpy 타입 변환 시작")
+            payload = self._convert_numpy_types(payload)
+            self.logger.debug("numpy 타입 변환 완료")
+            
+            # 헤더 구성
+            headers = {
+                "Content-Type": "application/json",
+                **settings.get_backend_auth_header()
+            }
+            
+            # POST 요청 전송
+            start_time = time.time()
+            response = requests.post(
+                backend_url,
+                json=payload,
+                headers=headers,
+                timeout=timeout
+            )
+            elapsed = time.time() - start_time
+            
+            # 응답 확인
+            response.raise_for_status()
+            result = response.json()
+            
+            self.logger.info(
+                "백엔드 POST 성공: status_code=%d, elapsed=%.2fs, response_keys=%s",
+                response.status_code,
+                elapsed,
+                list(result.keys()) if isinstance(result, dict) else type(result).__name__
+            )
+            
+            return result
+            
+        except requests.Timeout as e:
+            self.logger.error("백엔드 요청 타임아웃: %s", e)
+            raise
+        except requests.HTTPError as e:
+            self.logger.error("백엔드 HTTP 오류: status=%s, response=%s", 
+                            e.response.status_code if e.response else 'unknown',
+                            e.response.text[:500] if e.response else 'unknown')
+            raise
+        except Exception as e:
+            self.logger.error("백엔드 요청 중 예외 발생: %s", e, exc_info=True)
+            raise
 
     def _create_analysis_service(self) -> AnalysisService:
         """
@@ -743,8 +844,19 @@ class MCPHandler:
                     "백엔드 업로드 페이로드 키: %s",
                     list(backend_payload.keys()) if isinstance(backend_payload, dict) else type(backend_payload).__name__,
                 )
-                # 백엔드 업로드 기능은 향후 재구현 예정
-                backend_response = None
+                
+                # 백엔드에 POST 요청 전송
+                try:
+                    backend_response = self._post_to_backend(backend_url, backend_payload)
+                    self.logger.info("백엔드 업로드 성공: status=%s", backend_response.get('status') if isinstance(backend_response, dict) else 'unknown')
+                except Exception as e:
+                    self.logger.error("백엔드 업로드 실패: %s", e, exc_info=True)
+                    backend_response = {
+                        "status": "error",
+                        "error": str(e),
+                        "error_type": type(e).__name__
+                    }
+                
                 if isinstance(analysis_result, dict):
                     analysis_result = analysis_result.copy()
                     analysis_result['backend_response'] = backend_response
@@ -898,9 +1010,34 @@ def analyze_cell_performance_with_llm(request: dict) -> dict:
         result = analyze_cell_performance_with_llm(request)
         ```
     """
+    # numpy 타입 변환 유틸리티 함수 (로컬)
+    def convert_numpy_types(obj):
+        """numpy 타입을 Python 네이티브 타입으로 재귀적 변환"""
+        import numpy as np
+        
+        if isinstance(obj, dict):
+            return {key: convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy_types(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(convert_numpy_types(item) for item in obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        else:
+            return obj
+    
     # 새로운 MCPHandler 사용
     with MCPHandler() as handler:
-        return handler.handle_request(request)
+        result = handler.handle_request(request)
+        # numpy 타입 변환 (MCP tool 직렬화 에러 방지)
+        result = convert_numpy_types(result)
+        return result
 
 
 @mcp.tool
