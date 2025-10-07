@@ -142,6 +142,8 @@ class LLMClient(LLMRepository):
             settings = get_config_settings()
             llm_config = settings.get_llm_config_dict()
 
+            # API 키는 환경변수에서 직접 읽기 (Configuration Manager 우회)
+            api_key = os.getenv("LLM_API_KEY", "")
             self.config = {
                 "provider": llm_config["provider"],
                 "model": llm_config["model"],
@@ -150,11 +152,12 @@ class LLMClient(LLMRepository):
                 "timeout": llm_config["timeout"],
                 "max_retries": llm_config["max_retries"],
                 "retry_delay": llm_config["retry_delay"],
-                "api_key": settings.get_llm_api_key(),
+                "api_key": api_key,
                 "endpoints": self._load_endpoints(),
                 "mock_enabled": False,  # 기본값
             }
             logger.info("Configuration Manager에서 LLM 설정 로드 완료")
+            logger.debug("API 키 로드 상태: %s", "있음" if api_key else "없음")
 
         except Exception as e:
             logger.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
@@ -245,8 +248,12 @@ class LLMClient(LLMRepository):
         if provider != "local" and api_key:
             logger.debug("API 키를 Authorization 헤더에 추가 (provider: %s)", provider)
             headers["Authorization"] = f"Bearer {api_key}"
+        elif api_key:
+            # local provider이지만 API 키가 있으면 헤더에 추가 (vLLM 서버가 인증을 요구할 수 있음)
+            logger.debug("local provider이지만 API 키가 있어 Authorization 헤더에 추가")
+            headers["Authorization"] = f"Bearer {api_key}"
         else:
-            logger.debug("local provider 또는 API 키 없음 - Authorization 헤더 생략")
+            logger.debug("API 키 없음 - Authorization 헤더 생략")
         
         session.headers.update(headers)
 
