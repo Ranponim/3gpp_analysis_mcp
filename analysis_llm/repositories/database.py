@@ -402,9 +402,10 @@ class PostgreSQLRepository(DatabaseRepository):
                     # RealDictRow를 일반 딕셔너리로 변환
                     data = [dict(row) for row in results]
                     elapsed = (time.perf_counter() - t0) * 1000
+                    first_keys = list(data[0].keys()) if data else []
                     logger.info(
-                        "fetch_data(): 조회 완료 | rows=%d, %.1fms, params_keys=%s",
-                        len(data), elapsed, list((params or {}).keys())
+                        "fetch_data(): 조회 완료 | rows=%d, %.1fms, table=%s, window=%s, limit=%s, params_keys=%s, first_keys=%s",
+                        len(data), elapsed, table_name, time_range, limit, list((params or {}).keys()), first_keys
                     )
                     return data
 
@@ -520,6 +521,19 @@ class PostgreSQLRepository(DatabaseRepository):
         """
         logger.info("fetch_peg_data(): 호출 | table=%s, time_range=%s, filters_keys=%s",
                     table_name, time_range, list((filters or {}).keys()))
+        # 컨텍스트 요약 로그
+        try:
+            logger.info(
+                "fetch_peg_data(): 컨텍스트 | table=%s | start=%s | end=%s | columns_keys=%s | filters=%s | limit=%s",
+                table_name,
+                time_range[0] if time_range else None,
+                time_range[1] if time_range else None,
+                list((columns or {}).keys()),
+                (filters or {}),
+                limit,
+            )
+        except Exception:
+            logger.debug("fetch_peg_data(): 컨텍스트 로깅 스킵")
         # Columns 매핑 디버그 로그 (키/값과 JSONB 감지 결과 출력)
         try:
             logger.debug(
@@ -677,7 +691,14 @@ class PostgreSQLRepository(DatabaseRepository):
                 "fetch_peg_data(): JSONB 2단계 확장 모드(A안) 쿼리 구성 완료 | sql_len=%d, params_keys=%s",
                 len(query), list(params.keys())
             )
-            return self.fetch_data(query, params)
+            logger.debug("fetch_peg_data(): SQL preview=%s", query[:400].replace('\n',' '))
+            return self.fetch_data(
+                query,
+                params,
+                table_name=table_name,
+                time_range=(start_time, end_time),
+                limit=limit,
+            )
 
         # 비-JSONB 레거시 스키마: 기존 경로 유지
         select_columns = [
@@ -725,7 +746,14 @@ class PostgreSQLRepository(DatabaseRepository):
         if limit and limit > 0:
             query += f" LIMIT {limit}"
 
-        return self.fetch_data(query, params)
+        logger.debug("fetch_peg_data(): (레거시) SQL preview=%s", query[:400].replace('\n',' '))
+        return self.fetch_data(
+            query,
+            params,
+            table_name=table_name,
+            time_range=(start_time, end_time),
+            limit=limit,
+        )
 
     def get_table_info(self, table_name: str) -> Dict[str, Any]:
         """
