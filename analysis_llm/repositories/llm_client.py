@@ -427,8 +427,19 @@ class LLMClient(LLMRepository):
             try:
                 logger.info("LLM API 호출 시도 %d/%d: %s", i + 1, len(endpoints), endpoint)
 
+                # API 호출 전 디버깅 정보
+                logger.debug("POST 요청 URL: %s", f"{endpoint}/v1/chat/completions")
+                logger.debug("POST 요청 헤더: %s", dict(session.headers))
+                logger.debug("POST 요청 페이로드: %s", payload)
+                
                 # API 호출
                 response = session.post(f"{endpoint}/v1/chat/completions", json=payload, timeout=self.config["timeout"])
+                
+                # 응답 헤더도 로깅
+                logger.debug("응답 상태 코드: %d", response.status_code)
+                logger.debug("응답 헤더: %s", dict(response.headers))
+                if response.status_code != 200:
+                    logger.debug("응답 본문: %s", response.text[:500])
 
                 # 응답 상태 확인
                 if response.status_code == 200:
