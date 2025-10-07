@@ -672,12 +672,8 @@ class PostgreSQLRepository(DatabaseRepository):
                         conditions.append(f"{qualified} = %({key})s")
                         params[key] = value
 
-            # 메타/비수치 값 제외 조건
+            # 메타/비수치 값 제외 조건만 유지 (numeric 필터는 SELECT의 CASE로 처리)
             conditions.append("metric.key <> 'index_name'")
-            # 값이 유효한 숫자 패턴이며 길이 제한을 만족할 때만 포함 (overflow 방지)
-            conditions.append(
-                "(cv.clean_val ~ '^[+-]?(?:\\\d+(?:\\.\\\d+)?|\\.\\\d+)(?:[eE][+-]?\\\d+)?$' AND length(cv.clean_val) <= 40)"
-            )
 
             if conditions:
                 logger.debug("fetch_peg_data(): WHERE 구성 | %d개 조건", len(conditions))
