@@ -159,7 +159,7 @@ class LLMClient(LLMRepository):
         except Exception as e:
             logger.warning("Configuration Manager 로딩 실패, 기본값 사용: %s", e)
             self.config = {
-                "provider": os.getenv("LLM_PROVIDER", "openai"),
+                "provider": os.getenv("LLM_PROVIDER", "local"),
                 "model": os.getenv("LLM_MODEL", "Gemma-3-27B"),
                 "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "4096")),
                 "temperature": float(os.getenv("LLM_TEMPERATURE", "0.2")),
@@ -231,11 +231,27 @@ class LLMClient(LLMRepository):
         # 타임아웃 설정
         session.timeout = self.config["timeout"]
 
-        # User-Agent 설정
+        # 기본 헤더 설정
         user_agent = os.getenv("HTTP_USER_AGENT", "Cell-Performance-LLM-Analyzer/1.0")
-        session.headers.update({"User-Agent": user_agent, "Content-Type": "application/json"})
+        headers = {
+            "User-Agent": user_agent,
+            "Content-Type": "application/json"
+        }
+        
+        # local provider가 아닌 경우에만 Authorization 헤더 추가
+        provider = self.config.get("provider", "").lower()
+        api_key = self.config.get("api_key", "")
+        
+        if provider != "local" and api_key:
+            logger.debug("API 키를 Authorization 헤더에 추가 (provider: %s)", provider)
+            headers["Authorization"] = f"Bearer {api_key}"
+        else:
+            logger.debug("local provider 또는 API 키 없음 - Authorization 헤더 생략")
+        
+        session.headers.update(headers)
 
-        logger.debug("HTTP 세션 생성 완료: 재시도=%d, 타임아웃=%ds", self.config["max_retries"], self.config["timeout"])
+        logger.debug("HTTP 세션 생성 완료: 재시도=%d, 타임아웃=%ds, provider=%s", 
+                    self.config["max_retries"], self.config["timeout"], provider)
         return session
 
     def estimate_tokens(self, text: str) -> int:

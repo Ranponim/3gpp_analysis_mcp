@@ -93,9 +93,9 @@ class LLMConfig(BaseModel):
     """LLM (Large Language Model) 설정"""
 
     # 기본 LLM 제공업체 설정
-    provider: str = Field(default="openai", env="LLM_PROVIDER", description="LLM 제공업체")
+    provider: str = Field(default="local", env="LLM_PROVIDER", description="LLM 제공업체")
     api_key: Optional[SecretStr] = Field(default=None, env="LLM_API_KEY", description="LLM API 키")
-    model: str = Field(default="gpt-3.5-turbo", env="LLM_MODEL", description="사용할 모델")
+    model: str = Field(default="Gemma-3-27B", env="LLM_MODEL", description="사용할 모델")
 
     # API 요청 설정
     max_tokens: int = Field(default=2000, env="LLM_MAX_TOKENS", description="최대 토큰 수")
@@ -250,9 +250,9 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=5, env="DB_POOL_SIZE")
     
     # LLM 설정
-    llm_provider: str = Field(default="openai", env="LLM_PROVIDER")
+    llm_provider: str = Field(default="local", env="LLM_PROVIDER")
     llm_api_key: Optional[SecretStr] = Field(default=None, env="LLM_API_KEY")
-    llm_model: str = Field(default="gpt-3.5-turbo", env="LLM_MODEL")
+    llm_model: str = Field(default="Gemma-3-27B", env="LLM_MODEL")
     llm_max_tokens: int = Field(default=2000, env="LLM_MAX_TOKENS")
     llm_temperature: float = Field(default=0.7, env="LLM_TEMPERATURE")
     llm_timeout: int = Field(default=60, env="LLM_TIMEOUT")
