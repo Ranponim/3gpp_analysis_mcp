@@ -691,7 +691,7 @@ class PostgreSQLRepository(DatabaseRepository):
                 "fetch_peg_data(): JSONB 2단계 확장 모드(A안) 쿼리 구성 완료 | sql_len=%d, params_keys=%s",
                 len(query), list(params.keys())
             )
-            logger.debug("fetch_peg_data(): SQL preview=%s", query[:400].replace('\n',' '))
+            logger.debug("fetch_peg_data(): SQL preview=%s", query[:5000].replace('\n',' '))
             # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
             return self.fetch_data(query, params)
 
@@ -741,7 +741,7 @@ class PostgreSQLRepository(DatabaseRepository):
         if limit and limit > 0:
             query += f" LIMIT {limit}"
 
-        logger.debug("fetch_peg_data(): (레거시) SQL preview=%s", query[:400].replace('\n',' '))
+        logger.debug("fetch_peg_data(): (레거시) SQL preview=%s", query[:5000].replace('\n',' '))
         # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
         return self.fetch_data(query, params)
 
