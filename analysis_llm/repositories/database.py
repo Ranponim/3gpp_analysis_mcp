@@ -692,13 +692,8 @@ class PostgreSQLRepository(DatabaseRepository):
                 len(query), list(params.keys())
             )
             logger.debug("fetch_peg_data(): SQL preview=%s", query[:400].replace('\n',' '))
-            return self.fetch_data(
-                query,
-                params,
-                table_name=table_name,
-                time_range=(start_time, end_time),
-                limit=limit,
-            )
+            # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
+            return self.fetch_data(query, params)
 
         # 비-JSONB 레거시 스키마: 기존 경로 유지
         select_columns = [
@@ -747,13 +742,8 @@ class PostgreSQLRepository(DatabaseRepository):
             query += f" LIMIT {limit}"
 
         logger.debug("fetch_peg_data(): (레거시) SQL preview=%s", query[:400].replace('\n',' '))
-        return self.fetch_data(
-            query,
-            params,
-            table_name=table_name,
-            time_range=(start_time, end_time),
-            limit=limit,
-        )
+        # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
+        return self.fetch_data(query, params)
 
     def get_table_info(self, table_name: str) -> Dict[str, Any]:
         """
