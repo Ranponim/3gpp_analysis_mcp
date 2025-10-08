@@ -27,40 +27,65 @@ class BackendPayloadBuilder:
         analysis_request: dict
     ) -> dict:
         """
-        백엔드 V2 API용 페이로드 생성
+        백엔드 V2 API용 페이로드 생성 (DB 조회 값 우선)
         
         Args:
-            analysis_result: AnalysisService 결과
-            analysis_request: 원본 MCP 요청
+            analysis_result: AnalysisService 결과 (db_identifiers 포함 가능)
+            analysis_request: 원본 MCP 요청 (filters 포함)
             
         Returns:
             백엔드 V2 스키마 호환 페이로드
         """
         logger.info("백엔드 V2 페이로드 생성 시작")
         
-        # 필터에서 식별자 추출
+        # DB 조회 값 우선, filters 폴백, 기본값 순
         filters = analysis_request.get("filters", {})
         columns = analysis_request.get("columns", {})
+        db_identifiers = analysis_result.get("db_identifiers", {})
         
-        ne_id = BackendPayloadBuilder._extract_identifier(
-            filters.get("ne"),
-            default="unknown"
+        # ne_id: DB > filters > "unknown"
+        ne_id = (
+            db_identifiers.get("ne_id") or
+            BackendPayloadBuilder._extract_identifier(filters.get("ne")) or
+            "unknown"
         )
         
-        cell_id = BackendPayloadBuilder._extract_identifier(
-            filters.get("cellid"),
-            default="unknown"
+        # cell_id: DB > filters > "unknown"
+        cell_id = (
+            db_identifiers.get("cell_id") or
+            BackendPayloadBuilder._extract_identifier(filters.get("cellid")) or
+            "unknown"
         )
         
-        # host → swname 변환
-        swname = BackendPayloadBuilder._extract_identifier(
-            filters.get("host") or filters.get("swname"),
-            default="unknown"
+        # swname: DB > filters(host/swname) > "unknown"
+        swname = (
+            db_identifiers.get("swname") or
+            BackendPayloadBuilder._extract_identifier(
+                filters.get("host") or filters.get("swname")
+            ) or
+            "unknown"
         )
         
+        # rel_ver: filters만 사용 (DB에 저장되지 않음)
         rel_ver = BackendPayloadBuilder._extract_identifier(
             filters.get("rel_ver"),
             default=None
+        )
+        
+        logger.debug(
+            "식별자 우선순위 적용 결과:\n"
+            "  ne_id: %s (DB=%s, filters=%s)\n"
+            "  cell_id: %s (DB=%s, filters=%s)\n"
+            "  swname: %s (DB=%s, filters=%s)",
+            ne_id,
+            db_identifiers.get("ne_id"),
+            BackendPayloadBuilder._extract_identifier(filters.get("ne")),
+            cell_id,
+            db_identifiers.get("cell_id"),
+            BackendPayloadBuilder._extract_identifier(filters.get("cellid")),
+            swname,
+            db_identifiers.get("swname"),
+            BackendPayloadBuilder._extract_identifier(filters.get("host"))
         )
         
         # 분석 기간 파싱
@@ -137,11 +162,15 @@ class BackendPayloadBuilder:
     @staticmethod
     def _parse_analysis_period(n_minus_1: str, n: str) -> Dict[str, str]:
         """
-        분석 기간 파싱
+        분석 기간 파싱 (다양한 형식 지원)
+        
+        지원 형식:
+        - "2025-01-19_00:00~23:59" (기존 - 같은 날짜)
+        - "2025-09-04_21:15 ~2025-09-04_21:30" (신규 - 날짜_시간 ~날짜_시간)
         
         Args:
-            n_minus_1: N-1 기간 (예: "2025-01-19_00:00~23:59")
-            n: N 기간 (예: "2025-01-20_00:00~23:59")
+            n_minus_1: N-1 기간
+            n: N 기간
             
         Returns:
             {
@@ -151,21 +180,68 @@ class BackendPayloadBuilder:
                 "n_end": "2025-01-20 23:59:59"
             }
         """
+        def parse_single_datetime(dt_str: str) -> str:
+            """
+            단일 날짜-시간 파싱
+            
+            지원:
+            - "2025-01-19_00:00" → "2025-01-19 00:00:00"
+            - "00:00" → "00:00:00" (날짜 없음)
+            """
+            dt_str = dt_str.strip()
+            
+            if "_" in dt_str:
+                # "날짜_시간" 형식
+                date_part, time_part = dt_str.split("_", 1)
+                # 초가 없으면 추가
+                if time_part.count(":") == 1:
+                    return f"{date_part} {time_part}:00"
+                else:
+                    return f"{date_part} {time_part}"
+            else:
+                # 시간만 (날짜 없음)
+                if dt_str.count(":") == 1:
+                    return f"{dt_str}:00"
+                else:
+                    return dt_str
+        
         def parse_time_range(time_str: str) -> tuple:
             """
-            "2025-01-19_00:00~23:59" → ("2025-01-19 00:00:00", "2025-01-19 23:59:59")
+            시간 범위 파싱
+            
+            형식 1: "2025-01-19_00:00~23:59"
+            형식 2: "2025-09-04_21:15 ~2025-09-04_21:30"
             """
             if not time_str or "~" not in time_str:
                 return ("unknown", "unknown")
             
             try:
-                date_part, time_part = time_str.split("_")
-                start_time, end_time = time_part.split("~")
+                # 공백 제거 및 정규화
+                time_str = time_str.strip()
                 
-                start_datetime = f"{date_part} {start_time}:00"
-                end_datetime = f"{date_part} {end_time}:59"
+                # "~"로 분리
+                parts = time_str.split("~")
+                if len(parts) != 2:
+                    raise ValueError(f"잘못된 형식: 2개 부분 예상, {len(parts)}개 발견")
+                
+                start_str = parts[0].strip()
+                end_str = parts[1].strip()
+                
+                # 각 부분 파싱
+                start_datetime = parse_single_datetime(start_str)
+                end_datetime = parse_single_datetime(end_str)
+                
+                # 형식 1 호환: 끝 시간에 날짜가 없으면 시작 날짜 사용
+                if "_" in start_datetime and "_" not in end_str and ":" in end_str:
+                    # "2025-01-19_00:00" ~ "23:59" 형식
+                    date_part = start_datetime.split()[0]  # "2025-01-19"
+                    end_datetime = f"{date_part} {end_datetime}"
+                    # 초 처리
+                    if end_datetime.count(":") == 1:
+                        end_datetime = f"{end_datetime}:59"
                 
                 return (start_datetime, end_datetime)
+                
             except Exception as e:
                 logger.warning(f"시간 범위 파싱 실패: {time_str}, error={e}")
                 return ("unknown", "unknown")

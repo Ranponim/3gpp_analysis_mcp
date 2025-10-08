@@ -605,11 +605,16 @@ class AnalysisService:
 
             # 6단계: 결과 조립 (DataProcessor 결과 활용)
             logger.info("6단계: 결과 조립")
+            
+            # DB 식별자 추출 (processed_df에서)
+            db_identifiers = self._extract_db_identifiers(processed_df, request)
+            
             final_result = self._assemble_final_result_with_processor(
                 request=request,
                 time_ranges=time_ranges,
                 analyzed_peg_results=analyzed_peg_results,
                 llm_result=llm_result,
+                db_identifiers=db_identifiers,
             )
             logger.debug("최종 결과 조립 완료: keys=%s", list(final_result.keys()))
 
@@ -693,12 +698,106 @@ class AnalysisService:
         logger.info("최종 결과 조립 완료: %d개 최상위 키", len(result))
         return result
 
+    def _extract_db_identifiers(
+        self, 
+        processed_df: pd.DataFrame, 
+        request: Dict[str, Any]
+    ) -> Dict[str, Optional[str]]:
+        """
+        DB 조회된 실제 식별자 추출
+        
+        Args:
+            processed_df: PEG 처리 결과 DataFrame
+            request: 원본 요청
+            
+        Returns:
+            {
+                "ne_id": "nvgnb#10000",
+                "cell_id": "2010",
+                "swname": "host01"
+            }
+        """
+        logger.debug("_extract_db_identifiers() 호출: DB 식별자 추출")
+        
+        identifiers = {
+            "ne_id": None,
+            "cell_id": None,
+            "swname": None
+        }
+        
+        if processed_df.empty:
+            logger.warning("processed_df가 비어있어 DB 식별자를 추출할 수 없습니다")
+            return identifiers
+        
+        try:
+            # DataFrame에서 첫 번째 행의 값 추출
+            first_row = processed_df.iloc[0]
+            
+            # ne_id 추출 (ne_key 컬럼)
+            if 'ne_key' in processed_df.columns:
+                identifiers["ne_id"] = str(first_row['ne_key']) if pd.notna(first_row['ne_key']) else None
+            elif 'ne' in processed_df.columns:
+                identifiers["ne_id"] = str(first_row['ne']) if pd.notna(first_row['ne']) else None
+            
+            # swname 추출 (name 컬럼)
+            if 'name' in processed_df.columns:
+                identifiers["swname"] = str(first_row['name']) if pd.notna(first_row['name']) else None
+            elif 'host' in processed_df.columns:
+                identifiers["swname"] = str(first_row['host']) if pd.notna(first_row['host']) else None
+            
+            # cell_id 추출 (index_name 컬럼에서 파싱)
+            if 'index_name' in processed_df.columns:
+                index_name = str(first_row['index_name']) if pd.notna(first_row['index_name']) else ""
+                identifiers["cell_id"] = self._extract_cell_id_from_index_name(index_name)
+            
+            logger.info(
+                "DB 식별자 추출 완료: ne_id=%s, cell_id=%s, swname=%s",
+                identifiers["ne_id"],
+                identifiers["cell_id"],
+                identifiers["swname"]
+            )
+            
+        except Exception as e:
+            logger.error("DB 식별자 추출 중 오류: %s", e, exc_info=True)
+        
+        return identifiers
+    
+    def _extract_cell_id_from_index_name(self, index_name: str) -> Optional[str]:
+        """
+        index_name에서 cell_id 추출
+        
+        Args:
+            index_name: 예: "PEG_420_1100", "nvgnb#10000_2010"
+            
+        Returns:
+            cell_id: 예: "1100", "2010"
+        """
+        if not index_name:
+            return None
+        
+        try:
+            # "_"로 분리하여 마지막 부분 추출
+            parts = index_name.split("_")
+            if len(parts) >= 2:
+                # 마지막 부분이 숫자인지 확인
+                last_part = parts[-1]
+                if last_part.isdigit():
+                    return last_part
+                # 그게 아니면 뒤에서 두 번째 시도
+                elif len(parts) >= 3 and parts[-2].isdigit():
+                    return parts[-2]
+        except Exception as e:
+            logger.warning("index_name 파싱 실패: %s, error=%s", index_name, e)
+        
+        return None
+    
     def _assemble_final_result_with_processor(
         self,
         request: Dict[str, Any],
         time_ranges: tuple[datetime, datetime, datetime, datetime],
         analyzed_peg_results: List[AnalyzedPEGResult],
         llm_result: Dict[str, Any],
+        db_identifiers: Optional[Dict[str, Optional[str]]] = None,
     ) -> Dict[str, Any]:
         """
         DataProcessor 결과를 활용한 최종 결과 조립
@@ -708,6 +807,7 @@ class AnalysisService:
             time_ranges (tuple): 파싱된 시간 범위
             analyzed_peg_results (List[AnalyzedPEGResult]): DataProcessor 결과
             llm_result (Dict[str, Any]): LLM 분석 결과
+            db_identifiers (Optional[Dict]): DB 조회된 식별자
 
         Returns:
             Dict[str, Any]: 최종 분석 결과
@@ -731,6 +831,16 @@ class AnalysisService:
             "llm_analysis": normalized_llm,
             "metadata": self._build_metadata_payload(request, summary_stats),
         }
+        
+        # DB 식별자 추가 (BackendPayloadBuilder에서 사용)
+        if db_identifiers:
+            response_payload["db_identifiers"] = db_identifiers
+            logger.debug(
+                "DB 식별자 추가: ne_id=%s, cell_id=%s, swname=%s",
+                db_identifiers.get("ne_id"),
+                db_identifiers.get("cell_id"),
+                db_identifiers.get("swname")
+            )
 
         logger.info(
             "DataProcessor 결과 조립 완료: metrics=%d, summary=%s",
