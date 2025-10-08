@@ -551,54 +551,64 @@ class MCPHandler:
     
     def _build_backend_payload(self, analysis_result: dict, analysis_request: dict) -> dict:
         """
-        백엔드 POST 호출에 사용할 페이로드를 구성
+        백엔드 V2 API용 페이로드 생성
         
-        분석 결과와 요청 컨텍스트를 결합하여 백엔드 API로 전송할 페이로드를 생성합니다.
+        MCP 분석 결과를 간소화된 백엔드 V2 스키마에 맞게 변환합니다.
+        
+        주요 변경사항:
+        - host → swname 명칭 변경
+        - 중복 제거 및 구조 단순화
+        - 필수 필드만 포함
         
         Args:
             analysis_result (dict): AnalysisService의 분석 결과
             analysis_request (dict): 원본 요청 데이터
             
         Returns:
-            dict: 백엔드 API 전송용 페이로드
+            dict: 백엔드 V2 API 전송용 페이로드
         """
-
-        if not isinstance(analysis_result, dict):
-            return {"analysis_result": analysis_result}
-
-        payload: dict[str, Any] = analysis_result.copy()
-
-        request_context = {
-            "n_minus_1": analysis_request.get("n_minus_1"),
-            "n": analysis_request.get("n"),
-            "filters": self._sanitize_for_logging(analysis_request.get("filters", {})),
-            "analysis_type": analysis_request.get("analysis_type"),
-            "selected_pegs": analysis_request.get("selected_pegs"),
-        }
-
-        payload.setdefault("analysis_type", analysis_request.get("analysis_type"))
-        payload.setdefault("request_context", request_context)
-
-        # 백엔드 모델의 필수 필드인 ne_id와 cell_id 추가
-        filters = analysis_request.get("filters", {})
-        ne_id = filters.get("ne")
-        cell_id = filters.get("cellid")
-
-        # 값이 리스트일 경우 첫 번째 요소를 사용
-        if isinstance(ne_id, list) and ne_id:
-            ne_id = ne_id[0]
-        if isinstance(cell_id, list) and cell_id:
-            cell_id = cell_id[0]
-
-        # payload에 추가 (백엔드 스키마에 맞게 키 이름 변경)
-        payload["ne_id"] = ne_id or "unknown"
-        payload["cell_id"] = cell_id or "unknown"
+        from utils.backend_payload_builder import BackendPayloadBuilder
         
-        # analysis_date가 없는 경우 현재 시간으로 설정
-        if "analysis_date" not in payload:
-            payload["analysis_date"] = datetime.datetime.utcnow().isoformat()
-
-        return payload
+        self.logger.info("백엔드 V2 페이로드 생성")
+        
+        try:
+            payload = BackendPayloadBuilder.build_v2_payload(
+                analysis_result=analysis_result,
+                analysis_request=analysis_request
+            )
+            
+            self.logger.debug(
+                "백엔드 V2 페이로드 생성 완료: ne_id=%s, cell_id=%s, swname=%s",
+                payload.get("ne_id"),
+                payload.get("cell_id"),
+                payload.get("swname")
+            )
+            
+            return payload
+            
+        except Exception as e:
+            self.logger.error(f"백엔드 페이로드 생성 실패: {e}", exc_info=True)
+            # 폴백: 최소 필수 필드만 포함
+            filters = analysis_request.get("filters", {})
+            return {
+                "ne_id": str(filters.get("ne", ["unknown"])[0] if isinstance(filters.get("ne"), list) else filters.get("ne", "unknown")),
+                "cell_id": str(filters.get("cellid", ["unknown"])[0] if isinstance(filters.get("cellid"), list) else filters.get("cellid", "unknown")),
+                "swname": "unknown",
+                "analysis_period": {
+                    "n_minus_1_start": "unknown",
+                    "n_minus_1_end": "unknown",
+                    "n_start": "unknown",
+                    "n_end": "unknown"
+                },
+                "llm_analysis": {
+                    "summary": "페이로드 생성 실패",
+                    "issues": [],
+                    "recommendations": [],
+                    "confidence": None,
+                    "model_name": None
+                },
+                "peg_comparisons": []
+            }
     
     def _convert_numpy_types(self, obj: Any) -> Any:
         """
