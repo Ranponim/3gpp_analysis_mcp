@@ -239,7 +239,7 @@ class PEGProcessingService:
         self, n1_df: pd.DataFrame, n_df: pd.DataFrame, peg_config: Dict[str, Any]
     ) -> pd.DataFrame:
         """
-        PEGCalculator를 사용하여 데이터 처리
+        PEGCalculator를 사용하여 데이터 처리 (식별자 보존)
 
         Args:
             n1_df (pd.DataFrame): N-1 기간 데이터
@@ -247,7 +247,7 @@ class PEGProcessingService:
             peg_config (Dict[str, Any]): PEG 설정 (미사용 시 빈 딕셔너리)
 
         Returns:
-            pd.DataFrame: 처리된 PEG 데이터
+            pd.DataFrame: 처리된 PEG 데이터 (식별자 컬럼 포함)
 
         Raises:
             PEGProcessingError: PEG 처리 실패 시
@@ -255,6 +255,32 @@ class PEGProcessingService:
         logger.debug("_process_with_calculator() 호출: PEGCalculator 처리 시작")
 
         try:
+            # ✨ 식별자 정보 추출 (집계 전 - DB 조회 값 보존)
+            metadata = {}
+            source_df = n1_df if not n1_df.empty else n_df
+            
+            if not source_df.empty:
+                first_row = source_df.iloc[0]
+                
+                # ne_key 추출
+                if "ne_key" in source_df.columns:
+                    metadata["ne_key"] = str(first_row["ne_key"]) if pd.notna(first_row["ne_key"]) else None
+                
+                # name (swname) 추출
+                if "name" in source_df.columns:
+                    metadata["name"] = str(first_row["name"]) if pd.notna(first_row["name"]) else None
+                
+                # index_name 추출
+                if "index_name" in source_df.columns:
+                    metadata["index_name"] = str(first_row["index_name"]) if pd.notna(first_row["index_name"]) else None
+                
+                logger.debug(
+                    "식별자 추출 (집계 전): ne_key=%s, name=%s, index_name=%s",
+                    metadata.get("ne_key"),
+                    metadata.get("name"),
+                    metadata.get("index_name")
+                )
+            
             # 간단한 집계 로직 (PEGCalculator 완전 통합 전 임시)
             # N-1 기간 집계
             if not n1_df.empty:
@@ -320,8 +346,21 @@ class PEGProcessingService:
             else:
                 logger.warning("combined_df가 비어있습니다!")
                 processed_df = pd.DataFrame(columns=["peg_name", "period", "avg_value", "change_pct"])
+            
+            # ✨ 식별자 정보를 모든 행에 추가 (DB 조회 값 보존)
+            if metadata:
+                for key, value in metadata.items():
+                    if value is not None:
+                        processed_df[key] = value
+                        logger.debug("컬럼 추가: %s=%s", key, value)
 
-            logger.info("PEGCalculator 처리 완료: %d행", len(processed_df))
+            logger.info(
+                "PEGCalculator 처리 완료: %d행 (식별자 보존: ne_key=%s, name=%s, index_name=%s)",
+                len(processed_df),
+                metadata.get("ne_key"),
+                metadata.get("name"),
+                metadata.get("index_name")
+            )
             return processed_df
 
         except Exception as e:

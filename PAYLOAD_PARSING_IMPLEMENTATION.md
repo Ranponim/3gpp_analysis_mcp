@@ -394,9 +394,8 @@ filters = {}
    - `_build_backend_payload()`: 디버그 로그 강화
    - `_post_to_backend()`: 422 에러 상세 로그 추가
 
-4. ✅ `3gpp_analysis_mcp/docs/V2_DEBUGGING_ENHANCEMENT.md`: 디버깅 가이드 추가
-5. ✅ `3gpp_analysis_mcp/docs/PAYLOAD_PARSING_FIX_PLAN.md`: 수정 계획 문서
-6. ✅ `3gpp_analysis_mcp/docs/PAYLOAD_PARSING_IMPLEMENTATION.md`: 구현 완료 문서 (본 파일)
+4. ✅ `3gpp_analysis_mcp/PAYLOAD_PARSING_FIX_PLAN.md`: 수정 계획 문서
+5. ✅ `3gpp_analysis_mcp/PAYLOAD_PARSING_IMPLEMENTATION.md`: 구현 완료 문서 (본 파일)
 
 ## 🚀 배포 절차
 
@@ -428,10 +427,9 @@ docker logs kpi-mcp-llm 2>&1 | grep "백엔드 V2 페이로드 생성 완료"
 
 ## 🔗 관련 문서
 
-- [V2 디버깅 가이드](V2_DEBUGGING_ENHANCEMENT.md)
 - [Payload 파싱 수정 계획](PAYLOAD_PARSING_FIX_PLAN.md)
-- [백엔드 V2 API 요약](../../docs/ANALYSIS_API_V2_SUMMARY.md)
-- [프론트엔드 V2 통합](../../frontend/docs/V2_INTEGRATION_GUIDE.md)
+- [백엔드 V2 API 요약](../docs/ANALYSIS_API_V2_SUMMARY.md)
+- [프론트엔드 V2 통합](../frontend/docs/V2_INTEGRATION_GUIDE.md)
 
 ## 📞 문제 발생 시
 
