@@ -3,6 +3,7 @@
 ## 📋 문제 요약
 
 MCP가 백엔드 V2 API로 POST 요청 시 다음 문제 발생:
+
 1. ✅ 시간 파싱 실패: `"2025-09-04_21:15 ~2025-09-04_21:30"` 형식 처리 불가
 2. ✅ ne_id, cell_id, swname이 "unknown"으로 설정됨
 3. ✅ DB 조회된 실제 값이 payload에 반영되지 않음
@@ -12,6 +13,7 @@ MCP가 백엔드 V2 API로 POST 요청 시 다음 문제 발생:
 ### 1. 시간 파싱 로직 문제
 
 **현재 로직** (`BackendPayloadBuilder._parse_analysis_period`):
+
 ```python
 # 기대 형식: "2025-01-19_00:00~23:59" (같은 날짜)
 date_part, time_part = time_str.split("_")  # "2025-01-19", "00:00~23:59"
@@ -19,6 +21,7 @@ start_time, end_time = time_part.split("~")  # "00:00", "23:59"
 ```
 
 **실제 입력**:
+
 ```
 "2025-09-04_21:15 ~2025-09-04_21:30"
       ↓
@@ -31,6 +34,7 @@ time_part.split("~") → TOO MANY VALUES! ❌
 ### 2. 식별자 추출 문제
 
 **현재 로직** (`BackendPayloadBuilder.build_v2_payload`):
+
 ```python
 # filters에서만 추출 (사용자 입력값)
 filters = analysis_request.get("filters", {})
@@ -40,12 +44,14 @@ swname = self._extract_identifier(filters.get("host"), default="unknown")
 ```
 
 **문제점**:
+
 - `filters`에 값이 없으면 "unknown"으로 설정
 - DB 조회된 실제 값(`processed_df`의 ne_key, name, index_name)을 사용하지 않음
 
 ### 3. 데이터 전달 누락
 
 **AnalysisService 결과 구조**:
+
 ```python
 {
     "status": "success",
@@ -66,6 +72,7 @@ swname = self._extract_identifier(filters.get("host"), default="unknown")
 ### 방안 1: AnalysisService에서 실제 값 추출 및 전달 (권장)
 
 **장점**:
+
 - ✅ DB 조회된 **실제 값** 사용
 - ✅ 데이터 일관성 보장
 - ✅ filters가 비어있어도 동작
@@ -83,7 +90,7 @@ def _assemble_final_result_with_processor(
     llm_result: Dict[str, Any],
 ) -> Dict[str, Any]:
     """최종 결과 조립 (DB 조회 값 추가)"""
-    
+
     # 기존 로직
     response_payload = {
         "status": "success",
@@ -92,7 +99,7 @@ def _assemble_final_result_with_processor(
         "llm_analysis": {...},
         "metadata": {...},
     }
-    
+
     # ✨ 신규: DB 조회된 실제 식별자 추가
     if analyzed_peg_results:
         # analyzed_peg_results[0]에 ne_key, swname, cell_id 정보가 있음
@@ -104,7 +111,7 @@ def _assemble_final_result_with_processor(
                 getattr(first_result, "index_name", "")
             ),
         }
-    
+
     return response_payload
 
 def _extract_cell_id_from_index_name(self, index_name: str) -> Optional[str]:
@@ -125,30 +132,30 @@ def build_v2_payload(
     analysis_request: dict
 ) -> dict:
     """백엔드 V2 페이로드 생성 (DB 조회 값 우선)"""
-    
+
     filters = analysis_request.get("filters", {})
-    
+
     # ✨ 우선순위: DB 조회 값 > filters > "unknown"
     db_identifiers = analysis_result.get("db_identifiers", {})
-    
+
     ne_id = (
         db_identifiers.get("ne_id") or
         BackendPayloadBuilder._extract_identifier(filters.get("ne")) or
         "unknown"
     )
-    
+
     cell_id = (
         db_identifiers.get("cell_id") or
         BackendPayloadBuilder._extract_identifier(filters.get("cellid")) or
         "unknown"
     )
-    
+
     swname = (
         db_identifiers.get("swname") or
         BackendPayloadBuilder._extract_identifier(filters.get("host") or filters.get("swname")) or
         "unknown"
     )
-    
+
     # ... 나머지 로직
 ```
 
@@ -159,7 +166,7 @@ def build_v2_payload(
 def _parse_analysis_period(n_minus_1: str, n: str) -> Dict[str, str]:
     """
     분석 기간 파싱 (다양한 형식 지원)
-    
+
     지원 형식:
     - "2025-01-19_00:00~23:59" (기존)
     - "2025-09-04_21:15 ~2025-09-04_21:30" (신규)
@@ -167,39 +174,39 @@ def _parse_analysis_period(n_minus_1: str, n: str) -> Dict[str, str]:
     def parse_time_range(time_str: str) -> tuple:
         """
         시간 범위 파싱
-        
+
         지원 형식:
         1. "2025-01-19_00:00~23:59" → ("2025-01-19 00:00:00", "2025-01-19 23:59:59")
         2. "2025-09-04_21:15 ~2025-09-04_21:30" → ("2025-09-04 21:15:00", "2025-09-04 21:30:00")
         """
         if not time_str or "~" not in time_str:
             return ("unknown", "unknown")
-        
+
         try:
             # 공백 제거 및 정규화
             time_str = time_str.strip()
-            
+
             # "~"로 분리
             parts = time_str.split("~")
             if len(parts) != 2:
                 raise ValueError(f"Invalid format: expected 2 parts, got {len(parts)}")
-            
+
             start_str, end_str = parts[0].strip(), parts[1].strip()
-            
+
             # 각 부분 파싱
             start_datetime = parse_single_datetime(start_str)
             end_datetime = parse_single_datetime(end_str)
-            
+
             return (start_datetime, end_datetime)
-            
+
         except Exception as e:
             logger.warning(f"시간 범위 파싱 실패: {time_str}, error={e}")
             return ("unknown", "unknown")
-    
+
     def parse_single_datetime(dt_str: str) -> str:
         """
         단일 날짜-시간 파싱
-        
+
         지원 형식:
         - "2025-01-19_00:00" → "2025-01-19 00:00:00"
         - "2025-09-04_21:15" → "2025-09-04 21:15:00"
@@ -212,10 +219,10 @@ def _parse_analysis_period(n_minus_1: str, n: str) -> Dict[str, str]:
         else:
             # 시간만 (기존 형식 호환)
             return f"{time_part}:00"
-    
+
     n_minus_1_start, n_minus_1_end = parse_time_range(n_minus_1)
     n_start, n_end = parse_time_range(n)
-    
+
     return {
         "n_minus_1_start": n_minus_1_start,
         "n_minus_1_end": n_minus_1_end,
@@ -227,6 +234,7 @@ def _parse_analysis_period(n_minus_1: str, n: str) -> Dict[str, str]:
 ### 방안 2: processed_df를 analysis_result에 포함 (비권장)
 
 **단점**:
+
 - DataFrame 직렬화 필요
 - Payload 크기 증가
 - 데이터 중복
@@ -341,4 +349,3 @@ INFO - 백엔드 V2 페이로드 생성 완료: ne_id=nvgnb#10000, cell_id=2010,
 - `3gpp_analysis_mcp/analysis_llm/services/analysis_service.py`
 - `3gpp_analysis_mcp/analysis_llm/utils/backend_payload_builder.py`
 - `3gpp_analysis_mcp/analysis_llm/main.py`
-
