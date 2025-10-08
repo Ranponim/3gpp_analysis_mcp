@@ -568,8 +568,9 @@ class MCPHandler:
             dict: 백엔드 V2 API 전송용 페이로드
         """
         from .utils.backend_payload_builder import BackendPayloadBuilder
+        import json
         
-        self.logger.info("백엔드 V2 페이로드 생성")
+        self.logger.info("백엔드 V2 페이로드 생성 시작")
         
         try:
             payload = BackendPayloadBuilder.build_v2_payload(
@@ -577,12 +578,37 @@ class MCPHandler:
                 analysis_request=analysis_request
             )
             
+            # 상세 디버그 로깅
             self.logger.debug(
-                "백엔드 V2 페이로드 생성 완료: ne_id=%s, cell_id=%s, swname=%s",
+                "✅ 페이로드 생성 완료:\n"
+                "  최상위 키: %s\n"
+                "  ne_id: %s\n"
+                "  cell_id: %s\n"
+                "  swname: %s\n"
+                "  rel_ver: %s\n"
+                "  analysis_period: %s\n"
+                "  choi_result: %s\n"
+                "  llm_analysis 키: %s\n"
+                "  peg_comparisons 개수: %d\n"
+                "  analysis_id: %s",
+                list(payload.keys()) if payload else 'None',
                 payload.get("ne_id"),
                 payload.get("cell_id"),
-                payload.get("swname")
+                payload.get("swname"),
+                payload.get("rel_ver"),
+                payload.get("analysis_period"),
+                "있음" if payload.get("choi_result") else "없음",
+                list(payload.get("llm_analysis", {}).keys()) if payload.get("llm_analysis") else 'None',
+                len(payload.get("peg_comparisons", [])),
+                payload.get("analysis_id")
             )
+            
+            # JSON 직렬화 가능 여부 테스트
+            try:
+                json.dumps(payload, default=str)
+                self.logger.debug("JSON 직렬화 테스트 성공")
+            except Exception as json_err:
+                self.logger.warning("JSON 직렬화 테스트 실패: %s", json_err)
             
             return payload
             
@@ -703,9 +729,33 @@ class MCPHandler:
             self.logger.error("백엔드 요청 타임아웃: %s", e)
             raise
         except requests.HTTPError as e:
-            self.logger.error("백엔드 HTTP 오류: status=%s, response=%s", 
-                            e.response.status_code if e.response else 'unknown',
-                            e.response.text[:500] if e.response else 'unknown')
+            # 422 에러 시 상세 로깅 (Validation 에러)
+            if e.response and e.response.status_code == 422:
+                try:
+                    error_detail = e.response.json()
+                    self.logger.error(
+                        "❌ 백엔드 Validation 오류 (422):\n"
+                        "  응답 상세: %s\n"
+                        "  전송한 payload 키: %s\n"
+                        "  ne_id: %s, cell_id: %s, swname: %s\n"
+                        "  analysis_period: %s\n"
+                        "  llm_analysis 키: %s\n"
+                        "  peg_comparisons 개수: %d",
+                        error_detail,
+                        list(payload.keys()) if isinstance(payload, dict) else 'N/A',
+                        payload.get("ne_id") if isinstance(payload, dict) else 'N/A',
+                        payload.get("cell_id") if isinstance(payload, dict) else 'N/A',
+                        payload.get("swname") if isinstance(payload, dict) else 'N/A',
+                        payload.get("analysis_period") if isinstance(payload, dict) else 'N/A',
+                        list(payload.get("llm_analysis", {}).keys()) if isinstance(payload, dict) else 'N/A',
+                        len(payload.get("peg_comparisons", [])) if isinstance(payload, dict) else 0
+                    )
+                except:
+                    self.logger.error("422 응답 파싱 실패: %s", e.response.text[:500])
+            else:
+                self.logger.error("백엔드 HTTP 오류: status=%s, response=%s", 
+                                e.response.status_code if e.response else 'unknown',
+                                e.response.text[:500] if e.response else 'unknown')
             raise
         except Exception as e:
             self.logger.error("백엔드 요청 중 예외 발생: %s", e, exc_info=True)
