@@ -567,7 +567,7 @@ class MCPHandler:
         Returns:
             dict: 백엔드 V2 API 전송용 페이로드
         """
-        from utils.backend_payload_builder import BackendPayloadBuilder
+        from .utils.backend_payload_builder import BackendPayloadBuilder
         
         self.logger.info("백엔드 V2 페이로드 생성")
         
