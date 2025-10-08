@@ -52,11 +52,11 @@ Clean Architecture 패턴을 적용하여 Repository, Service, Presentation 계�
   "table": "kpi_summary",
   "columns": {
     "time": "datetime",
-    "family_name": "family_name",
+    "family_name": "family_id",
     "values": "values",
     "ne": "ne_key",
     "rel_ver": "rel_ver",
-    "host": "name"
+    "swname": "swname"
   },
   "filters": {
     "ne": "420",            // DU 지정 (ne_key)

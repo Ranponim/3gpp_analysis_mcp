@@ -325,11 +325,11 @@ class AnalysisService:
             # columns는 MCP handler에서 원본 보존됨. 없을 때만 기본값 적용
             columns = request.get("columns") or {
                 "time": "datetime",
-                "family_name": "family_name",
+                "family_name": "family_id",
                 "values": "values",
                 "ne": "ne_key",
                 "rel_ver": "rel_ver",
-                "host": "name",
+                "swname": "swname",
             }
 
             # N-1 기간 데이터 조회
@@ -483,11 +483,11 @@ class AnalysisService:
                         "columns",
                         {
                             "time": "datetime",
-                            "family_name": "family_name",
+                            "family_name": "family_id",
                             "values": "values",
                             "ne": "ne_key",
                             "rel_ver": "rel_ver",
-                            "host": "name",
+                            "swname": "swname",
                         },
                     ),
                     "data_limit": request.get("data_limit"),

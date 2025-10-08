@@ -560,9 +560,9 @@ class PostgreSQLRepository(DatabaseRepository):
         if json_mode:
             time_col = columns.get('time', 'datetime')
             values_col = columns.get('values', 'values')
-            family_col = columns.get('family_name', 'family_name')
+            family_col = columns.get('family_name', 'family_id')
             ne_col = columns.get('ne') or columns.get('ne_key') or 'ne_key'
-            host_col = columns.get('host') or columns.get('name') or 'name'
+            swname_col = columns.get('swname', 'swname')
             relver_col = columns.get('rel_ver', 'rel_ver')
             # 차원(alias) 매핑: JSONB index_name → 필터 키
             dimension_alias_map = {
@@ -571,8 +571,8 @@ class PostgreSQLRepository(DatabaseRepository):
                 'bpu_id': 'BPU_ID',
             }
             logger.debug(
-                "fetch_peg_data(): JSONB 모드 | cols={time:%s,family:%s,values:%s,ne:%s,host:%s,rel_ver:%s} | dims=%s",
-                time_col, family_col, values_col, ne_col, host_col, relver_col, dimension_alias_map
+                "fetch_peg_data(): JSONB 모드 | cols={time:%s,family:%s,values:%s,ne:%s,swname:%s,rel_ver:%s} | dims=%s",
+                time_col, family_col, values_col, ne_col, swname_col, relver_col, dimension_alias_map
             )
 
             # 두 단계 확장:
@@ -597,8 +597,8 @@ class PostgreSQLRepository(DatabaseRepository):
             # 선택적 컬럼들 추가 (존재 시)
             if ne_col:
                 select_parts.append(f"t.{ne_col} AS ne")
-            if host_col:
-                select_parts.append(f"t.{host_col} AS host")
+            if swname_col:
+                select_parts.append(f"t.{swname_col} AS swname")
             if relver_col:
                 select_parts.append(f"t.{relver_col} AS rel_ver")
 
@@ -699,7 +699,7 @@ class PostgreSQLRepository(DatabaseRepository):
         ]
 
         # 선택적 컬럼들 추가
-        optional_columns = ["ne", "cellid", "host"]
+        optional_columns = ["ne", "cellid", "swname"]
         for col_key in optional_columns:
             if col_key in columns and columns[col_key]:
                 select_columns.append(f"{columns[col_key]} as {col_key}")

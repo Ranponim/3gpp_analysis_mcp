@@ -161,15 +161,15 @@ class PEGProcessingService:
             n1_start, n1_end, n_start, n_end = time_ranges
 
             table_name = table_config.get("table", _DEFAULT_TABLE)
-            # 새 스키마 기본 매핑 (datetime, family_name, ne_key, rel_ver, name, values)
+            # 새 스키마 기본 매핑 (datetime, family_id, ne_key, rel_ver, swname, values, version)
             # 상위에서 보존된 columns를 우선 사용, 없으면 JSONB 기본 매핑 적용
             columns = table_config.get("columns") or {
                 "time": "datetime",
-                "family_name": "family_name",
+                "family_name": "family_id",
                 "values": "values",
                 "ne": "ne_key",
                 "rel_ver": "rel_ver",
-                "host": "name",
+                "swname": "swname",
             }
             data_limit = table_config.get("data_limit")
 
@@ -262,22 +262,22 @@ class PEGProcessingService:
             if not source_df.empty:
                 first_row = source_df.iloc[0]
                 
-                # ne_key 추출
-                if "ne_key" in source_df.columns:
-                    metadata["ne_key"] = str(first_row["ne_key"]) if pd.notna(first_row["ne_key"]) else None
+                # ne_key 추출 (DB가 'ne'로 반환)
+                if "ne" in source_df.columns:
+                    metadata["ne_key"] = str(first_row["ne"]) if pd.notna(first_row["ne"]) else None
                 
-                # name (swname) 추출
-                if "name" in source_df.columns:
-                    metadata["name"] = str(first_row["name"]) if pd.notna(first_row["name"]) else None
+                # swname 추출 (DB 컬럼명 그대로)
+                if "swname" in source_df.columns:
+                    metadata["swname"] = str(first_row["swname"]) if pd.notna(first_row["swname"]) else None
                 
-                # index_name 추출
+                # index_name 추출 (JSONB values 내부에 있을 수 있음)
                 if "index_name" in source_df.columns:
                     metadata["index_name"] = str(first_row["index_name"]) if pd.notna(first_row["index_name"]) else None
                 
                 logger.debug(
-                    "식별자 추출 (집계 전): ne_key=%s, name=%s, index_name=%s",
+                    "식별자 추출 (집계 전): ne_key=%s, swname=%s, index_name=%s",
                     metadata.get("ne_key"),
-                    metadata.get("name"),
+                    metadata.get("swname"),
                     metadata.get("index_name")
                 )
             
@@ -355,10 +355,10 @@ class PEGProcessingService:
                         logger.debug("컬럼 추가: %s=%s", key, value)
 
             logger.info(
-                "PEGCalculator 처리 완료: %d행 (식별자 보존: ne_key=%s, name=%s, index_name=%s)",
+                "PEGCalculator 처리 완료: %d행 (식별자 보존: ne_key=%s, swname=%s, index_name=%s)",
                 len(processed_df),
                 metadata.get("ne_key"),
-                metadata.get("name"),
+                metadata.get("swname"),
                 metadata.get("index_name")
             )
             return processed_df

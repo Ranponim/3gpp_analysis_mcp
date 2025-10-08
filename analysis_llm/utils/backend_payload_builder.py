@@ -57,11 +57,11 @@ class BackendPayloadBuilder:
             "unknown"
         )
         
-        # swname: DB > filters(host/swname) > "unknown"
+        # swname: DB > filters(swname) > "unknown"
         swname = (
             db_identifiers.get("swname") or
             BackendPayloadBuilder._extract_identifier(
-                filters.get("host") or filters.get("swname")
+                filters.get("swname")
             ) or
             "unknown"
         )
@@ -85,7 +85,7 @@ class BackendPayloadBuilder:
             BackendPayloadBuilder._extract_identifier(filters.get("cellid")),
             swname,
             db_identifiers.get("swname"),
-            BackendPayloadBuilder._extract_identifier(filters.get("host"))
+            BackendPayloadBuilder._extract_identifier(filters.get("swname"))
         )
         
         # 분석 기간 파싱
