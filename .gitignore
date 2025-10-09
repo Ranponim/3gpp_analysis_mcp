@@ -37,3 +37,9 @@ node_modules/
 # Python bytecode and cache
 __pycache__/
 *.pyc
+
+#test code
+test_*
+
+#md files
+*.md

@@ -578,10 +578,12 @@ class PostgreSQLRepository(DatabaseRepository):
             # 두 단계 확장:
             # 1) 최상위 인덱스/키를 펼침 (idx)
             # 2) 객체면 내부 PEG를, 스칼라이면 (idx.key, idx.val)로 치환해 metric으로 펼침
-            #    peg_name은 객체일 때 'metric.key[idx.key]' 형식으로 만들어 파이프라인 변경 없이 차원 포함
+            #    peg_name은 객체일 때 index_name 포함 형식: 'DimensionName:value,metric.key'
             peg_name_expr = (
-                "(CASE WHEN jsonb_typeof(idx.val) = 'object' "
-                "THEN (metric.key || '[' || idx.key || ']') "
+                "(CASE WHEN jsonb_typeof(idx.val) = 'object' THEN "
+                # index_name 추출 및 포함 (요구사항 3: index_name 정보 보존)
+                "COALESCE(jsonb_extract_path_text(idx.val, 'index_name'), 'Dim') "
+                "|| ':' || idx.key || ',' || metric.key "
                 "ELSE metric.key END) AS peg_name"
             )
 

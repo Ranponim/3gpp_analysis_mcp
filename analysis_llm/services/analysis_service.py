@@ -730,6 +730,13 @@ class AnalysisService:
             return identifiers
         
         try:
+            # DataFrame 컬럼 확인 (디버깅)
+            logger.debug(
+                "processed_df 컬럼 목록: %s (총 %d개)",
+                list(processed_df.columns),
+                len(processed_df.columns)
+            )
+            
             # DataFrame에서 첫 번째 행의 값 추출
             first_row = processed_df.iloc[0]
             
@@ -739,11 +746,9 @@ class AnalysisService:
             elif 'ne' in processed_df.columns:
                 identifiers["ne_id"] = str(first_row['ne']) if pd.notna(first_row['ne']) else None
             
-            # swname 추출 (name 컬럼)
-            if 'name' in processed_df.columns:
-                identifiers["swname"] = str(first_row['name']) if pd.notna(first_row['name']) else None
-            elif 'host' in processed_df.columns:
-                identifiers["swname"] = str(first_row['host']) if pd.notna(first_row['host']) else None
+            # swname 추출 (swname 컬럼)
+            if 'swname' in processed_df.columns:
+                identifiers["swname"] = str(first_row['swname']) if pd.notna(first_row['swname']) else None
             
             # cell_id 추출 (index_name 컬럼에서 파싱)
             if 'index_name' in processed_df.columns:

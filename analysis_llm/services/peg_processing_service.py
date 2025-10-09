@@ -236,7 +236,7 @@ class PEGProcessingService:
         logger.info("원시 데이터 검증 완료: N-1=%d행, N=%d행", len(n1_df), len(n_df))
 
     def _process_with_calculator(
-        self, n1_df: pd.DataFrame, n_df: pd.DataFrame, peg_config: Dict[str, Any]
+        self, n1_df: pd.DataFrame, n_df: pd.DataFrame, peg_config: Dict[str, Any], filters: Dict[str, Any]
     ) -> pd.DataFrame:
         """
         PEGCalculator를 사용하여 데이터 처리 (식별자 보존)
@@ -245,6 +245,7 @@ class PEGProcessingService:
             n1_df (pd.DataFrame): N-1 기간 데이터
             n_df (pd.DataFrame): N 기간 데이터
             peg_config (Dict[str, Any]): PEG 설정 (미사용 시 빈 딕셔너리)
+            filters (Dict[str, Any]): 필터 조건 (cell_id 평균화 판단용)
 
         Returns:
             pd.DataFrame: 처리된 PEG 데이터 (식별자 컬럼 포함)
@@ -280,6 +281,49 @@ class PEGProcessingService:
                     metadata.get("swname"),
                     metadata.get("index_name")
                 )
+            
+            # ✨ 요구사항 2: cell_id 필터 없으면 여러 cell 평균화
+            if 'cellid' not in filters or not filters.get('cellid'):
+                logger.info("cell_id 미지정 - 여러 cell 평균화 수행")
+                
+                for df_name, df in [("N-1", n1_df), ("N", n_df)]:
+                    if not df.empty and 'peg_name' in df.columns:
+                        # peg_name에서 CellIdentity 차원 제거
+                        # 패턴: 'CellIdentity:숫자,' 형식 제거
+                        # 예: CellIdentity:0,QCI:20,PEG → QCI:20,PEG
+                        original_count = len(df)
+                        df['peg_name'] = df['peg_name'].str.replace(
+                            r'CellIdentity:\d+,',  # CellIdentity:숫자, 패턴
+                            '', 
+                            regex=True
+                        )
+                        logger.debug(
+                            "%s 기간: peg_name에서 CellIdentity 차원 제거 (행수: %d)",
+                            df_name, original_count
+                        )
+                
+                # 재집계 (cell이 제거된 peg_name 기준)
+                if not n1_df.empty:
+                    logger.debug("N-1 재집계 전: %d행", len(n1_df))
+                    n1_df = n1_df.groupby(['timestamp', 'peg_name']).agg({
+                        'value': 'mean',
+                        'ne': 'first',
+                        'swname': 'first',
+                        'family_name': 'first'
+                    }).reset_index()
+                    logger.info("N-1 cell 평균화 완료: %d행", len(n1_df))
+                
+                if not n_df.empty:
+                    logger.debug("N 재집계 전: %d행", len(n_df))
+                    n_df = n_df.groupby(['timestamp', 'peg_name']).agg({
+                        'value': 'mean',
+                        'ne': 'first',
+                        'swname': 'first',
+                        'family_name': 'first'
+                    }).reset_index()
+                    logger.info("N cell 평균화 완료: %d행", len(n_df))
+            else:
+                logger.debug("cell_id 필터 존재 - cell 평균화 건너뜀")
             
             # 간단한 집계 로직 (PEGCalculator 완전 통합 전 임시)
             # N-1 기간 집계
@@ -419,7 +463,7 @@ class PEGProcessingService:
 
             # 4단계: PEGCalculator 처리
             logger.info("4단계: PEGCalculator 처리")
-            processed_df = self._process_with_calculator(n1_df, n_df, peg_config or {})
+            processed_df = self._process_with_calculator(n1_df, n_df, peg_config or {}, filters)
             logger.debug(
                 "PEGCalculator 처리 결과: 행수=%d, 컬럼=%s",
                 len(processed_df),
