@@ -5,13 +5,13 @@
 metadata:
   version: "1.0"
   description: "3GPP PEG 분석을 위한 프롬프트 템플릿"
-  format_type: "python_basic"  # jinja2에서 변경 가능
+  format_type: "python_basic" # jinja2에서 변경 가능
   created_date: "2025-09-21"
   variables:
     - name: "n1_range"
       type: "string"
       description: "기간 n-1의 날짜 범위"
-    - name: "n_range" 
+    - name: "n_range"
       type: "string"
       description: "기간 n의 날짜 범위"
     - name: "data_preview"
@@ -30,8 +30,8 @@ prompts:
     - 기간 n-1: {n1_range}
     - 기간 n: {n_range}
         - 표 컬럼: peg_name, avg_n_minus_1, avg_n, diff, pct_change
-        - 원본 스키마 예시: id(int), datetime(ts), value(double), version(text), family_name(text), cellid(text), peg_name(text), host(text), ne(text)
-          (평균은 value 컬럼 기준)
+        - 원본 스키마 예시: datatime(timestamp with timezone), family_id(int), family_name(char), ne_key(int), rel_ver(char), swname(char), values(jsonb), version(char)
+          (평균은 values 컬럼의 JSONB 내부 값 기준)
 
     [데이터 표]
     {data_preview}
@@ -54,7 +54,7 @@ prompts:
       "cells_with_significant_change": {{"CELL_NAME": "설명"}}
     }}
 
-  # 고도화된 종합 분석 프롬프트  
+  # 고도화된 종합 분석 프롬프트
   enhanced: |
     [페르소나 및 임무]
     당신은 Tier-1 이동통신사에서 20년 경력을 가진 수석 네트워크 진단 및 최적화 전략가입니다. 당신의 임무는 신속한 근본 원인 분석(RCA)을 수행하고, 고객 영향도에 따라 문제의 우선순위를 정하며, 현장 엔지니어링 팀을 위한 명확하고 실행 가능한 계획을 제공하는 것입니다. 당신의 분석은 3GPP 표준(TS 36/38.xxx 시리즈)과 운영 모범 사례에 부합해야 하며, 엄격하고 증거에 기반해야 합니다.

@@ -714,7 +714,8 @@ class AnalysisService:
             {
                 "ne_id": "nvgnb#10000",
                 "cell_id": "2010",
-                "swname": "host01"
+                "swname": "host01",
+                "rel_ver": "5.0.0"
             }
         """
         logger.debug("_extract_db_identifiers() 호출: DB 식별자 추출")
@@ -722,7 +723,8 @@ class AnalysisService:
         identifiers = {
             "ne_id": None,
             "cell_id": None,
-            "swname": None
+            "swname": None,
+            "rel_ver": None
         }
         
         if processed_df.empty:
@@ -750,16 +752,21 @@ class AnalysisService:
             if 'swname' in processed_df.columns:
                 identifiers["swname"] = str(first_row['swname']) if pd.notna(first_row['swname']) else None
             
+            # rel_ver 추출 (rel_ver 컬럼)
+            if 'rel_ver' in processed_df.columns:
+                identifiers["rel_ver"] = str(first_row['rel_ver']) if pd.notna(first_row['rel_ver']) else None
+            
             # cell_id 추출 (index_name 컬럼에서 파싱)
             if 'index_name' in processed_df.columns:
                 index_name = str(first_row['index_name']) if pd.notna(first_row['index_name']) else ""
                 identifiers["cell_id"] = self._extract_cell_id_from_index_name(index_name)
             
             logger.info(
-                "DB 식별자 추출 완료: ne_id=%s, cell_id=%s, swname=%s",
+                "DB 식별자 추출 완료: ne_id=%s, cell_id=%s, swname=%s, rel_ver=%s",
                 identifiers["ne_id"],
                 identifiers["cell_id"],
-                identifiers["swname"]
+                identifiers["swname"],
+                identifiers["rel_ver"]
             )
             
         except Exception as e:

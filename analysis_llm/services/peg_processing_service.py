@@ -271,14 +271,19 @@ class PEGProcessingService:
                 if "swname" in source_df.columns:
                     metadata["swname"] = str(first_row["swname"]) if pd.notna(first_row["swname"]) else None
                 
+                # rel_ver 추출 (DB 컬럼명 그대로)
+                if "rel_ver" in source_df.columns:
+                    metadata["rel_ver"] = str(first_row["rel_ver"]) if pd.notna(first_row["rel_ver"]) else None
+                
                 # index_name 추출 (JSONB values 내부에 있을 수 있음)
                 if "index_name" in source_df.columns:
                     metadata["index_name"] = str(first_row["index_name"]) if pd.notna(first_row["index_name"]) else None
                 
                 logger.debug(
-                    "식별자 추출 (집계 전): ne_key=%s, swname=%s, index_name=%s",
+                    "식별자 추출 (집계 전): ne_key=%s, swname=%s, rel_ver=%s, index_name=%s",
                     metadata.get("ne_key"),
                     metadata.get("swname"),
+                    metadata.get("rel_ver"),
                     metadata.get("index_name")
                 )
             
@@ -399,10 +404,11 @@ class PEGProcessingService:
                         logger.debug("컬럼 추가: %s=%s", key, value)
 
             logger.info(
-                "PEGCalculator 처리 완료: %d행 (식별자 보존: ne_key=%s, swname=%s, index_name=%s)",
+                "PEGCalculator 처리 완료: %d행 (식별자 보존: ne_key=%s, swname=%s, rel_ver=%s, index_name=%s)",
                 len(processed_df),
                 metadata.get("ne_key"),
                 metadata.get("swname"),
+                metadata.get("rel_ver"),
                 metadata.get("index_name")
             )
             return processed_df
