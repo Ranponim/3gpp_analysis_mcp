@@ -454,3 +454,4 @@ docker logs kpi-mcp-llm 2>&1 | grep "백엔드 V2 페이로드 생성 완료"
 
 4. **백엔드 응답 확인**:
    - `detail` 필드에서 어떤 필드가 validation에 실패했는지 확인
+

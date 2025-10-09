@@ -285,3 +285,4 @@ ERROR - ❌ 백엔드 Validation 오류 (422):
 3. Payload Builder 로직 수정 (필요 시)
 4. 백엔드 스키마 검증 (필요 시)
 
+
