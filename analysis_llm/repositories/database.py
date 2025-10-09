@@ -558,6 +558,15 @@ class PostgreSQLRepository(DatabaseRepository):
         start_time, end_time = time_range
 
         if json_mode:
+            # 설정에서 재귀 깊이 제한 가져오기
+            try:
+                settings = get_config_settings()
+                max_recursion_depth = settings.jsonb_max_recursion_depth
+                logger.debug("fetch_peg_data(): 재귀 깊이 제한=%d (from settings)", max_recursion_depth)
+            except Exception as e:
+                max_recursion_depth = 5  # 기본값
+                logger.warning("fetch_peg_data(): 설정 로드 실패, 기본 재귀 깊이=%d 사용 (%s)", max_recursion_depth, e)
+            
             time_col = columns.get('time', 'datetime')
             values_col = columns.get('values', 'values')
             family_col = columns.get('family_name', 'family_id')
@@ -575,118 +584,137 @@ class PostgreSQLRepository(DatabaseRepository):
                 time_col, family_col, values_col, ne_col, swname_col, relver_col, dimension_alias_map
             )
 
-            # 두 단계 확장:
-            # 1) 최상위 인덱스/키를 펼침 (idx)
-            # 2) 객체면 내부 PEG를, 스칼라이면 (idx.key, idx.val)로 치환해 metric으로 펼침
-            #    peg_name은 객체일 때 index_name 포함 형식: 'DimensionName:value,metric.key'
-            peg_name_expr = (
-                "(CASE WHEN jsonb_typeof(idx.val) = 'object' THEN "
-                # index_name 추출 및 포함 (요구사항 3: index_name 정보 보존)
-                "COALESCE(jsonb_extract_path_text(idx.val, 'index_name'), 'Dim') "
-                "|| ':' || idx.key || ',' || metric.key "
-                "ELSE metric.key END) AS peg_name"
+            # 재귀적 JSONB 확장 (중첩된 index_name 구조 완전히 펼치기)
+            # WITH RECURSIVE를 사용하여 모든 depth의 중첩 객체를 펼침
+            # 결과: path (차원 경로), peg_name (메트릭명), value (값)
+            
+            # CTE를 사용한 재귀 확장
+            # 1) 초기: 최상위 키-값 쌍 추출
+            # 2) 재귀: 객체면 계속 펼치고, 스칼라면 최종 값으로 수집
+            recursive_cte = f"""
+            WITH RECURSIVE flattened AS (
+                -- 초기: 최상위 values에서 키-값 쌍 추출
+                SELECT 
+                    t.{time_col} AS timestamp,
+                    t.{family_col} AS family_name,
+                    {"t." + ne_col + " AS ne," if ne_col else ""}
+                    {"t." + swname_col + " AS swname," if swname_col else ""}
+                    {"t." + relver_col + " AS rel_ver," if relver_col else ""}
+                    kv.key AS path_key,
+                    kv.value AS current_val,
+                    CASE 
+                        WHEN jsonb_typeof(kv.value) = 'object' 
+                        THEN jsonb_extract_path_text(kv.value, 'index_name')
+                        ELSE NULL 
+                    END AS index_name,
+                    ARRAY[kv.key] AS path_array,
+                    0 AS depth
+                FROM {table_name} t
+                CROSS JOIN LATERAL jsonb_each(t.{values_col}) AS kv(key, value)
+                WHERE t.{time_col} BETWEEN %(start_time)s AND %(end_time)s
+                
+                UNION ALL
+                
+                -- 재귀: 객체면 한 단계 더 펼치기
+                SELECT 
+                    f.timestamp,
+                    f.family_name,
+                    {"f.ne," if ne_col else ""}
+                    {"f.swname," if swname_col else ""}
+                    {"f.rel_ver," if relver_col else ""}
+                    kv.key AS path_key,
+                    kv.value AS current_val,
+                    CASE 
+                        WHEN jsonb_typeof(kv.value) = 'object' 
+                        THEN jsonb_extract_path_text(kv.value, 'index_name')
+                        ELSE NULL 
+                    END AS index_name,
+                    f.path_array || kv.key AS path_array,
+                    f.depth + 1 AS depth
+                FROM flattened f
+                CROSS JOIN LATERAL jsonb_each(f.current_val) AS kv(key, value)
+                WHERE jsonb_typeof(f.current_val) = 'object'
+                  AND kv.key <> 'index_name'  -- index_name은 메타데이터이므로 제외
+                  AND f.depth < %(max_recursion_depth)s  -- 설정된 재귀 깊이 제한
             )
-
+            """
+            
+            # 재귀 깊이 파라미터 추가
+            params['max_recursion_depth'] = max_recursion_depth
+            
+            # 최종 SELECT: 리프 노드(스칼라 값)만 선택
             select_parts: List[str] = [
-                f"t.{time_col} AS timestamp",
-                f"t.{family_col} AS family_name",
-                peg_name_expr,
-                # 안전 캐스팅: 유효한 숫자 패턴이며 길이가 과도하지 않을 때만 double precision 캐스팅
-                "CASE WHEN (cv.clean_val ~ '^[+-]?(?:\\\d+(?:\\.\\\d+)?|\\.\\\d+)(?:[eE][+-]?\\\d+)?$' AND length(cv.clean_val) <= 40) "
-                "THEN cv.clean_val::double precision ELSE NULL END AS value",
+                "timestamp",
+                "family_name",
             ]
-
-            # 선택적 컬럼들 추가 (존재 시)
             if ne_col:
-                select_parts.append(f"t.{ne_col} AS ne")
+                select_parts.append("ne")
             if swname_col:
-                select_parts.append(f"t.{swname_col} AS swname")
+                select_parts.append("swname")
             if relver_col:
-                select_parts.append(f"t.{relver_col} AS rel_ver")
-
-            query = (
-                f"SELECT {', '.join(select_parts)} FROM {table_name} t "
-                f"CROSS JOIN LATERAL jsonb_each(t.{values_col}) AS idx(key, val) "
-                f"CROSS JOIN LATERAL jsonb_each_text("
-                f"CASE WHEN jsonb_typeof(idx.val) = 'object' THEN idx.val ELSE jsonb_build_object(idx.key, idx.val) END"
-                f") AS metric(key, value) "
-                f"CROSS JOIN LATERAL ("
-                f"SELECT NULLIF(regexp_replace(metric.value, '[^0-9\\.\\-eE]', '', 'g'),'') AS clean_val"
-                f") AS cv"
+                select_parts.append("rel_ver")
+            
+            # peg_name: path_array를 역순으로 나열 (index_name들과 함께)
+            # 형식: "Dim1:val1,Dim2:val2,metric_name"
+            select_parts.append("path_key AS peg_name")
+            
+            # value: 스칼라 값을 숫자로 변환
+            select_parts.append(
+                "CASE WHEN jsonb_typeof(current_val) IN ('number', 'string') THEN "
+                "  CASE WHEN (clean_val ~ '^[+-]?(?:\\\d+(?:\\.\\\d+)?|\\.\\\d+)(?:[eE][+-]?\\\d+)?$' AND length(clean_val) <= 40) "
+                "    THEN clean_val::double precision "
+                "    ELSE NULL "
+                "  END "
+                "ELSE NULL END AS value"
             )
-            logger.debug("fetch_peg_data(): SELECT 구성 완료 | select_parts=%s", select_parts)
+            
+            query = (
+                f"{recursive_cte} "
+                f"SELECT {', '.join(select_parts)} FROM flattened "
+                f"CROSS JOIN LATERAL ("
+                f"  SELECT NULLIF(regexp_replace(current_val::text, '[^0-9\\.\\-eE]', '', 'g'),'') AS clean_val"
+                f") AS cv "
+                f"WHERE jsonb_typeof(current_val) <> 'object'"  # 리프 노드만 (스칼라 값)
+            )
+            logger.debug("fetch_peg_data(): 재귀 CTE 구성 완료 | select_parts=%s", select_parts)
 
-            # 시간 조건 (별칭 t.)
-            conditions.append(f"t.{time_col} BETWEEN %(start_time)s AND %(end_time)s")
+            # 시간 조건은 이미 CTE 내부에 포함됨
             params['start_time'] = start_time
             params['end_time'] = end_time
 
-            # 추가 필터
+            # 추가 필터 (재귀 CTE 후 적용)
+            additional_conditions: List[str] = []
+            
             if filters:
-                index_name_expr = f"jsonb_extract_path_text(t.{values_col}, 'index_name')"
-
-                # 1) 차원 필터(cellid/qci/bpu_id 등):
-                #    원칙 - 어떤 차원 필터가 와도 해당 index_name에는 key 조건을 적용하고,
-                #           그 외 index_name은 항상 포함(무조건 파싱)되도록 OR 그룹 구성
-                dim_filters = {k: v for k, v in filters.items() if k in dimension_alias_map and v is not None}
-                if dim_filters:
-                    logger.debug("fetch_peg_data(): 차원 필터 감지 | %s", {k: (v if isinstance(v, (list,tuple,set)) else [v]) for k,v in dim_filters.items()})
-                    per_dim_clauses: List[str] = []
-                    dim_in_names: List[str] = []
-                    for dim_key, dim_value in dim_filters.items():
-                        iname = dimension_alias_map[dim_key]
-                        dim_in_names.append(iname)
-                        pname_iname = f"{dim_key}_index_name"
-                        params[pname_iname] = iname
-                        if isinstance(dim_value, (list, tuple, set)) and dim_value:
-                            placeholders = ",".join([f"%({dim_key}_{i})s" for i, _ in enumerate(dim_value)])
-                            for i, v in enumerate(dim_value):
-                                params[f"{dim_key}_{i}"] = str(v)
-                            per_dim_clauses.append(f"( {index_name_expr} = %({pname_iname})s AND idx.key IN ({placeholders}) )")
-                        else:
-                            params[dim_key] = str(dim_value)
-                            per_dim_clauses.append(f"( {index_name_expr} = %({pname_iname})s AND idx.key = %({dim_key})s )")
-
-                    # others clause: index_name이 어떤 지정 iname에도 속하지 않거나 NULL인 경우 모두 포함
-                    other_names_placeholders = ",".join([f"%(dim_iname_{i})s" for i in range(len(dim_in_names))])
-                    for i, nm in enumerate(dim_in_names):
-                        params[f"dim_iname_{i}"] = nm
-                    others_clause = f"( {index_name_expr} IS NULL OR {index_name_expr} NOT IN ({other_names_placeholders}) )"
-
-                    clause_preview = " OR ".join(per_dim_clauses + ["..."])
-                    logger.debug("fetch_peg_data(): 차원 필터 WHERE 구성 | preview=%s", clause_preview[:160])
-                    conditions.append("( " + " OR ".join(per_dim_clauses + [others_clause]) + " )")
-
-                # 2) 테이블 컬럼 기반 필터 (columns 매핑된 키만 허용, t. 접두사 적용)
+                # 테이블 컬럼 기반 필터만 적용 (ne, swname 등)
                 for key, value in filters.items():
                     if value is None:
                         continue
                     col_name = columns.get(key)
                     if not col_name:
                         continue
-                    qualified = f"t.{col_name}"
+                    # 차원 필터는 제외 (cellid, qci, bpu_id)
+                    if key in dimension_alias_map:
+                        continue
+                    
                     if isinstance(value, (list, tuple, set)) and value:
                         placeholders = ",".join([f"%({key}_{i})s" for i, _ in enumerate(value)])
-                        conditions.append(f"{qualified} IN ({placeholders})")
+                        additional_conditions.append(f"{key} IN ({placeholders})")
                         for i, v in enumerate(value):
                             params[f"{key}_{i}"] = v
                     else:
-                        conditions.append(f"{qualified} = %({key})s")
+                        additional_conditions.append(f"{key} = %({key})s")
                         params[key] = value
 
-            # 메타/비수치 값 제외 조건만 유지 (numeric 필터는 SELECT의 CASE로 처리)
-            conditions.append("metric.key <> 'index_name'")
+            if additional_conditions:
+                query += " AND " + " AND ".join(additional_conditions)
 
-            if conditions:
-                logger.debug("fetch_peg_data(): WHERE 구성 | %d개 조건", len(conditions))
-                query += " WHERE " + " AND ".join(conditions)
-
-            query += f" ORDER BY t.{time_col}"
+            query += " ORDER BY timestamp"
             if limit and limit > 0:
                 query += f" LIMIT {limit}"
 
             logger.info(
-                "fetch_peg_data(): JSONB 2단계 확장 모드(A안) 쿼리 구성 완료 | sql_len=%d, params_keys=%s",
+                "fetch_peg_data(): 재귀 JSONB 확장 쿼리 구성 완료 | sql_len=%d, params_keys=%s",
                 len(query), list(params.keys())
             )
             logger.debug("fetch_peg_data(): SQL preview=%s", query[:5000].replace('\n',' '))

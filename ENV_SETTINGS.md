@@ -131,6 +131,13 @@ set DEFAULT_DB_NAME=postgres
 - `PEG_MAX_FORMULA_COMPLEXITY`: 최대 수식 복잡도 (기본값: 100)
 - `PEG_USE_CHOI`: Choi Deterministic 판정 알고리즘 사용 여부 (기본값: false)
 
+### JSONB 파싱 설정
+
+- `JSONB_MAX_RECURSION_DEPTH`: JSONB 재귀 파싱 최대 깊이 (기본값: 5)
+  - 중첩된 index_name 구조를 파싱할 때 최대 재귀 깊이 제한
+  - 값이 클수록 더 깊은 중첩 구조 처리 가능하지만 성능에 영향
+  - 권장 범위: 3~10
+
 ### 프롬프트 설정
 
 - `DEFAULT_MAX_PROMPT_TOKENS`: 최대 프롬프트 토큰 수

@@ -278,6 +278,9 @@ class Settings(BaseSettings):
     peg_max_formula_complexity: int = Field(default=100, env="PEG_MAX_FORMULA_COMPLEXITY")
     peg_use_choi: bool = Field(default=False, env="PEG_USE_CHOI")
     
+    # JSONB 파싱 설정
+    jsonb_max_recursion_depth: int = Field(default=5, env="JSONB_MAX_RECURSION_DEPTH", description="JSONB 재귀 파싱 최대 깊이")
+    
     # 로깅 설정
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_file_enabled: bool = Field(default=False, env="LOG_FILE_ENABLED")
@@ -323,7 +326,7 @@ class Settings(BaseSettings):
             raise ValueError(f"peg_default_aggregation must be one of {valid_methods}")
         return v.lower()
     
-    @validator('db_port', 'backend_timeout', 'llm_timeout', 'llm_max_retries', 'peg_max_formula_complexity')
+    @validator('db_port', 'backend_timeout', 'llm_timeout', 'llm_max_retries', 'peg_max_formula_complexity', 'jsonb_max_recursion_depth')
     def validate_positive_integer(cls, v):
         """양수 검증"""
         if v <= 0:
@@ -402,6 +405,7 @@ class Settings(BaseSettings):
             "enable_derived_pegs": self.peg_enable_derived,
             "default_time_window": self.peg_default_time_window,
             "max_formula_complexity": self.peg_max_formula_complexity,
+            "jsonb_max_recursion_depth": self.jsonb_max_recursion_depth,
             "derived_peg_definitions": {
                 "success_rate": "response_count/preamble_count*100",
                 "drop_rate": "(preamble_count-response_count)/preamble_count*100",

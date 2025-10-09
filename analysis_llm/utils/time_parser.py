@@ -80,12 +80,12 @@ class TimeRangeParser:
                 "America/New_York": "-05:00",  # EST (간단화)
                 "Europe/London": "+00:00",  # GMT (간단화)
             }
-            offset_text = timezone_offsets.get(app_timezone, "+09:00")
+            offset_text = timezone_offsets.get(app_timezone, "+00:00")  # 기본값을 UTC로 변경
             logger.debug("Configuration Manager에서 타임존 오프셋: %s (from %s)", offset_text, app_timezone)
 
         except Exception as e:
-            # 폴백: 환경변수 직접 사용
-            offset_text = os.getenv("DEFAULT_TZ_OFFSET", "+09:00").strip()
+            # 폴백: 환경변수 직접 사용 (기본값도 UTC로 변경)
+            offset_text = os.getenv("DEFAULT_TZ_OFFSET", "+00:00").strip()
             logger.debug("타임존 오프셋 환경변수 (폴백): %s", offset_text)
 
         try:
