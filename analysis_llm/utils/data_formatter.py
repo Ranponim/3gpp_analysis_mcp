@@ -62,8 +62,9 @@ def format_dataframe_for_prompt(
     logging.info(f"format_dataframe_for_prompt() 호출: DataFrame 크기={df.shape}")
     
     # 기본 우선 컬럼 설정
+    # PEG 분석에 필요한 실제 컬럼명들
     if preferred_columns is None:
-        preferred_columns = ["peg_name", "avg_value", "period"]
+        preferred_columns = ["peg_name", "avg_n_minus_1", "avg_n", "diff", "pct_change"]
     
     # 우선 컬럼 선택 (존재하는 컬럼만)
     available_preferred_cols = [col for col in preferred_columns if col in df.columns]
@@ -72,9 +73,9 @@ def format_dataframe_for_prompt(
         selected_columns = available_preferred_cols
         logging.info(f"우선 컬럼 사용: {selected_columns}")
     else:
-        # 우선 컬럼이 없으면 처음 N개 컬럼 사용
-        selected_columns = list(df.columns)[:fallback_column_count]
-        logging.info(f"대체 컬럼 사용 (처음 {fallback_column_count}개): {selected_columns}")
+        # 우선 컬럼이 없으면 모든 컬럼 사용
+        selected_columns = list(df.columns)
+        logging.info(f"대체 컬럼 사용 (전체 컬럼): {selected_columns}")
     
     # 컬럼 필터링된 DataFrame 생성
     filtered_df = df[selected_columns]

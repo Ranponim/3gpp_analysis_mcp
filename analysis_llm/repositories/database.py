@@ -691,7 +691,31 @@ class PostgreSQLRepository(DatabaseRepository):
             )
             logger.debug("fetch_peg_data(): SQL preview=%s", query[:5000].replace('\n',' '))
             # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
-            return self.fetch_data(query, params)
+            
+            # 🔍 디버깅: 조회된 데이터의 value 컬럼 통계
+            result_data = self.fetch_data(query, params)
+            if result_data:
+                logger.debug(
+                    "fetch_peg_data() 결과: 총=%d행, 샘플 데이터=%s",
+                    len(result_data),
+                    result_data[:3] if len(result_data) > 0 else []
+                )
+                
+                # value 컬럼 통계 (null, 0 개수)
+                value_list = [row.get('value') for row in result_data]
+                null_count = sum(1 for v in value_list if v is None)
+                zero_count = sum(1 for v in value_list if v == 0 or v == 0.0)
+                non_zero_count = sum(1 for v in value_list if v is not None and v != 0 and v != 0.0)
+                
+                logger.debug(
+                    "fetch_peg_data() value 컬럼 통계: null=%d개, 0=%d개, 0이_아닌_값=%d개, 샘플_value=%s",
+                    null_count, zero_count, non_zero_count,
+                    [v for v in value_list[:10] if v is not None]
+                )
+            else:
+                logger.warning("fetch_peg_data() 결과가 비어있습니다!")
+            
+            return result_data
 
         # 비-JSONB 레거시 스키마: 기존 경로 유지
         select_columns = [

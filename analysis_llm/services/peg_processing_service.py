@@ -333,15 +333,51 @@ class PEGProcessingService:
             # 간단한 집계 로직 (PEGCalculator 완전 통합 전 임시)
             # N-1 기간 집계
             if not n1_df.empty:
+                # 🔍 디버깅: 원시 데이터의 value 컬럼 확인
+                logger.debug(
+                    "N-1 원시 데이터 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
+                    n1_df['value'].head(10).tolist() if 'value' in n1_df.columns else 'value 컬럼 없음',
+                    n1_df['value'].isnull().sum() if 'value' in n1_df.columns else 0,
+                    (n1_df['value'] == 0).sum() if 'value' in n1_df.columns else 0,
+                    len(n1_df)
+                )
+                
                 n1_aggregated = n1_df.groupby("peg_name")["value"].mean().reset_index()
                 n1_aggregated["period"] = "N-1"
+                
+                # 🔍 디버깅: 집계 후 값 확인
+                logger.debug(
+                    "N-1 집계 후 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
+                    n1_aggregated['value'].head(10).tolist(),
+                    n1_aggregated['value'].isnull().sum(),
+                    (n1_aggregated['value'] == 0).sum(),
+                    len(n1_aggregated)
+                )
             else:
                 n1_aggregated = pd.DataFrame(columns=["peg_name", "value", "period"])
 
             # N 기간 집계
             if not n_df.empty:
+                # 🔍 디버깅: 원시 데이터의 value 컬럼 확인
+                logger.debug(
+                    "N 원시 데이터 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
+                    n_df['value'].head(10).tolist() if 'value' in n_df.columns else 'value 컬럼 없음',
+                    n_df['value'].isnull().sum() if 'value' in n_df.columns else 0,
+                    (n_df['value'] == 0).sum() if 'value' in n_df.columns else 0,
+                    len(n_df)
+                )
+                
                 n_aggregated = n_df.groupby("peg_name")["value"].mean().reset_index()
                 n_aggregated["period"] = "N"
+                
+                # 🔍 디버깅: 집계 후 값 확인
+                logger.debug(
+                    "N 집계 후 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
+                    n_aggregated['value'].head(10).tolist(),
+                    n_aggregated['value'].isnull().sum(),
+                    (n_aggregated['value'] == 0).sum(),
+                    len(n_aggregated)
+                )
             else:
                 n_aggregated = pd.DataFrame(columns=["peg_name", "value", "period"])
 
@@ -350,24 +386,95 @@ class PEGProcessingService:
 
             # 변화율 계산 로직
             if not combined_df.empty:
-                # pivot으로 N-1, N 기간을 컬럼으로 변환
-                pivot_df = combined_df.pivot(index="peg_name", columns="period", values="value").fillna(0)
-                
+                # 🔍 디버깅: pivot 전 combined_df 확인
                 logger.debug(
-                    "pivot 결과: shape=%s, columns=%s, N-1_존재=%s, N_존재=%s",
+                    "pivot 전 combined_df: shape=%s, 샘플 데이터=%s",
+                    combined_df.shape,
+                    combined_df.head(10).to_dict('records') if len(combined_df) > 0 else []
+                )
+                
+                # pivot으로 N-1, N 기간을 컬럼으로 변환
+                # ⚠️ fillna(0) 제거 - 실제 null 값 보존하여 디버깅
+                pivot_df = combined_df.pivot(index="peg_name", columns="period", values="value")
+                
+                # 🔍 디버깅: pivot 후 null 값 확인
+                logger.debug(
+                    "pivot 결과 (fillna 전): shape=%s, columns=%s, N-1_존재=%s, N_존재=%s",
                     pivot_df.shape,
                     list(pivot_df.columns),
                     "N-1" in pivot_df.columns,
                     "N" in pivot_df.columns
                 )
+                
+                if "N-1" in pivot_df.columns:
+                    logger.debug(
+                        "N-1 컬럼 통계: null=%d개, 0=%d개, 샘플 값=%s",
+                        pivot_df["N-1"].isnull().sum(),
+                        (pivot_df["N-1"] == 0).sum(),
+                        pivot_df["N-1"].head(10).tolist()
+                    )
+                
+                if "N" in pivot_df.columns:
+                    logger.debug(
+                        "N 컬럼 통계: null=%d개, 0=%d개, 샘플 값=%s",
+                        pivot_df["N"].isnull().sum(),
+                        (pivot_df["N"] == 0).sum(),
+                        pivot_df["N"].head(10).tolist()
+                    )
 
                 if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
-                    # N-1이 0인 경우 체크 (division by zero 방지)
-                    zero_n1_count = (pivot_df["N-1"] == 0).sum()
-                    if zero_n1_count > 0:
-                        logger.warning("N-1 값이 0인 PEG가 %d개 있습니다 (변화율 계산 시 0으로 처리)", zero_n1_count)
+                    # ✅ 변화율 계산 개선
+                    # 1. N-1이 0인 경우 체크 (division by zero 방지)
+                    zero_n1_mask = (pivot_df["N-1"] == 0)
+                    null_n1_mask = pivot_df["N-1"].isnull()
+                    null_n_mask = pivot_df["N"].isnull()
                     
-                    pivot_df["change_pct"] = ((pivot_df["N"] - pivot_df["N-1"]) / pivot_df["N-1"] * 100).fillna(0)
+                    zero_n1_count = zero_n1_mask.sum()
+                    null_n1_count = null_n1_mask.sum()
+                    null_n_count = null_n_mask.sum()
+                    
+                    logger.debug(
+                        "변화율 계산 전: N-1=0인 PEG=%d개, N-1=null인 PEG=%d개, N=null인 PEG=%d개",
+                        zero_n1_count, null_n1_count, null_n_count
+                    )
+                    
+                    # 2. 변화율 계산 (null 값 보존)
+                    # N-1이나 N이 null이면 변화율도 null로 처리
+                    # N-1이 0이면 변화율 계산 불가 (0으로 나누기) -> null 처리
+                    pivot_df["change_pct"] = None  # 초기화
+                    
+                    # 유효한 데이터만 계산 (N-1, N 모두 존재하고, N-1이 0이 아님)
+                    valid_mask = (~null_n1_mask) & (~null_n_mask) & (~zero_n1_mask)
+                    
+                    if valid_mask.sum() > 0:
+                        pivot_df.loc[valid_mask, "change_pct"] = (
+                            (pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) 
+                            / pivot_df.loc[valid_mask, "N-1"] 
+                            * 100
+                        )
+                        logger.info(
+                            "변화율 계산 완료: %d개 PEG (유효 데이터만 계산)",
+                            valid_mask.sum()
+                        )
+                    else:
+                        logger.warning("유효한 데이터가 없어 변화율을 계산할 수 없습니다!")
+                    
+                    # N-1이 0인 경우 경고 (변화율 계산 불가)
+                    if zero_n1_count > 0:
+                        logger.warning(
+                            "N-1 값이 0인 PEG가 %d개 있습니다 (변화율 계산 불가, null 처리)",
+                            zero_n1_count
+                        )
+                        # N-1=0인 PEG 목록 출력 (최대 10개)
+                        zero_pegs = pivot_df[zero_n1_mask].head(10).index.tolist()
+                        logger.debug("N-1=0인 PEG 샘플: %s", zero_pegs)
+                    
+                    # null 값이 있는 경우 경고
+                    if null_n1_count > 0 or null_n_count > 0:
+                        logger.warning(
+                            "데이터 누락: N-1=null인 PEG=%d개, N=null인 PEG=%d개",
+                            null_n1_count, null_n_count
+                        )
                     
                     # change_pct 통계 출력 (디버깅)
                     non_zero_changes = (pivot_df["change_pct"] != 0).sum()
