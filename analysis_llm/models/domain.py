@@ -22,14 +22,26 @@ class TimeRange:
 
     start_time: datetime
     end_time: datetime
-    timezone_offset: str = "+09:00"
+    timezone_offset: Optional[str] = None  # 환경변수에서 자동으로 가져옴
 
     def __post_init__(self):
         """시간 범위 검증"""
         if self.start_time >= self.end_time:
             raise ValueError("시작 시간은 종료 시간보다 이전이어야 합니다")
 
-        logger.debug("TimeRange 생성: %s ~ %s (%s)", self.start_time, self.end_time, self.timezone_offset)
+        # timezone_offset이 명시적으로 전달되지 않은 경우, datetime 객체의 tzinfo에서 추출
+        if self.timezone_offset is None and self.start_time.tzinfo is not None:
+            offset = self.start_time.utcoffset()
+            if offset is not None:
+                hours, remainder = divmod(int(offset.total_seconds()), 3600)
+                minutes = remainder // 60
+                self.timezone_offset = f"{hours:+03d}:{minutes:02d}"
+            else:
+                self.timezone_offset = "+00:00"  # UTC
+        elif self.timezone_offset is None:
+            self.timezone_offset = "+00:00"  # tzinfo가 없으면 UTC로 간주
+
+        logger.debug("TimeRange 생성: %s ~ %s (tzinfo=%s)", self.start_time, self.end_time, self.timezone_offset)
 
     def duration_hours(self) -> float:
         """시간 범위의 길이(시간 단위)"""
@@ -62,6 +74,7 @@ class PEGData:
     ne: Optional[str] = None
     cellid: Optional[str] = None
     host: Optional[str] = None
+    dimensions: Optional[str] = None  # 차원 정보 (예: "CellIdentity=20,PLMN=0,gnb_ID=0,SPIDIncludingInvalid=0,QCI=0")
 
     def __post_init__(self):
         """PEG 데이터 검증"""
@@ -71,15 +84,40 @@ class PEGData:
             raise ValueError("PEG 이름은 문자열이어야 합니다")
 
         # NaN 값 처리
-        if math.isnan(self.value):
+        if self.value is not None and math.isnan(self.value):
             logger.warning("PEG %s의 값이 NaN입니다. 0.0으로 대체합니다.", self.peg_name)
             self.value = 0.0
 
-        logger.debug("PEGData 생성: %s = %.2f (%s)", self.peg_name, self.value, self.timestamp)
+        logger.debug(
+            "PEGData 생성: %s = %.2f (%s)%s",
+            self.peg_name,
+            self.value if self.value is not None else 0.0,
+            self.timestamp,
+            f" [dimensions={self.dimensions}]" if self.dimensions else "",
+        )
 
     def is_valid_value(self) -> bool:
         """유효한 값인지 확인"""
+        if self.value is None:
+            return False
         return not (math.isnan(self.value) or math.isinf(self.value))
+    
+    def parse_dimensions(self) -> Dict[str, str]:
+        """
+        차원 정보를 파싱하여 딕셔너리로 변환
+        
+        Returns:
+            Dict[str, str]: 차원명 -> 값 매핑 (예: {"CellIdentity": "20", "PLMN": "0", ...})
+        """
+        if not self.dimensions:
+            return {}
+        
+        result = {}
+        for pair in self.dimensions.split(","):
+            if "=" in pair:
+                key, value = pair.split("=", 1)
+                result[key.strip()] = value.strip()
+        return result
 
     def to_dict(self) -> Dict[str, Any]:
         """딕셔너리로 변환"""
@@ -90,6 +128,8 @@ class PEGData:
             "ne": self.ne,
             "cellid": self.cellid,
             "host": self.host,
+            "dimensions": self.dimensions,
+            "parsed_dimensions": self.parse_dimensions() if self.dimensions else None,
         }
 
 

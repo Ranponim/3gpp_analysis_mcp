@@ -292,45 +292,48 @@ class PEGProcessingService:
                 logger.info("cell_id 미지정 - 여러 cell 평균화 수행")
                 
                 for df_name, df in [("N-1", n1_df), ("N", n_df)]:
-                    if not df.empty and 'peg_name' in df.columns:
-                        # peg_name에서 CellIdentity 차원 제거
-                        # 패턴: 'CellIdentity:숫자,' 형식 제거
-                        # 예: CellIdentity:0,QCI:20,PEG → QCI:20,PEG
+                    if not df.empty and 'dimensions' in df.columns:
+                        # dimensions에서 CellIdentity 차원 제거
+                        # 예: "PLMN=0,gnb_ID=0,CellIdentity=20,SPIDIncludingInvalid=0,QCI=0"
+                        # → "PLMN=0,gnb_ID=0,SPIDIncludingInvalid=0,QCI=0"
                         original_count = len(df)
-                        df['peg_name'] = df['peg_name'].str.replace(
-                            r'CellIdentity:\d+,',  # CellIdentity:숫자, 패턴
+                        df['dimensions'] = df['dimensions'].str.replace(
+                            r'CellIdentity=\d+,?',  # CellIdentity=숫자, 패턴
                             '', 
                             regex=True
-                        )
+                        ).str.strip(',')  # 끝에 남은 쉼표 제거
                         logger.debug(
-                            "%s 기간: peg_name에서 CellIdentity 차원 제거 (행수: %d)",
+                            "%s 기간: dimensions에서 CellIdentity 제거 (행수: %d)",
                             df_name, original_count
                         )
                 
-                # 재집계 (cell이 제거된 peg_name 기준)
+                # 재집계 (cell이 제거된 dimensions 기준)
+                agg_columns = ['value']
+                first_columns = ['ne', 'swname', 'family_name']
                 if not n1_df.empty:
                     logger.debug("N-1 재집계 전: %d행", len(n1_df))
-                    n1_df = n1_df.groupby(['timestamp', 'peg_name']).agg({
-                        'value': 'mean',
-                        'ne': 'first',
-                        'swname': 'first',
-                        'family_name': 'first'
-                    }).reset_index()
+                    group_keys = ['timestamp', 'peg_name', 'dimensions'] if 'dimensions' in n1_df.columns else ['timestamp', 'peg_name']
+                    agg_dict = {'value': 'mean'}
+                    for col in first_columns:
+                        if col in n1_df.columns:
+                            agg_dict[col] = 'first'
+                    n1_df = n1_df.groupby(group_keys).agg(agg_dict).reset_index()
                     logger.info("N-1 cell 평균화 완료: %d행", len(n1_df))
                 
                 if not n_df.empty:
                     logger.debug("N 재집계 전: %d행", len(n_df))
-                    n_df = n_df.groupby(['timestamp', 'peg_name']).agg({
-                        'value': 'mean',
-                        'ne': 'first',
-                        'swname': 'first',
-                        'family_name': 'first'
-                    }).reset_index()
+                    group_keys = ['timestamp', 'peg_name', 'dimensions'] if 'dimensions' in n_df.columns else ['timestamp', 'peg_name']
+                    agg_dict = {'value': 'mean'}
+                    for col in first_columns:
+                        if col in n_df.columns:
+                            agg_dict[col] = 'first'
+                    n_df = n_df.groupby(group_keys).agg(agg_dict).reset_index()
                     logger.info("N cell 평균화 완료: %d행", len(n_df))
             else:
                 logger.debug("cell_id 필터 존재 - cell 평균화 건너뜀")
             
             # 간단한 집계 로직 (PEGCalculator 완전 통합 전 임시)
+            # dimensions 필드를 보존하면서 집계
             # N-1 기간 집계
             if not n1_df.empty:
                 # 🔍 디버깅: 원시 데이터의 value 컬럼 확인
@@ -342,7 +345,9 @@ class PEGProcessingService:
                     len(n1_df)
                 )
                 
-                n1_aggregated = n1_df.groupby("peg_name")["value"].mean().reset_index()
+                # dimensions가 있으면 함께 groupby
+                group_keys = ['peg_name', 'dimensions'] if 'dimensions' in n1_df.columns else ['peg_name']
+                n1_aggregated = n1_df.groupby(group_keys)["value"].mean().reset_index()
                 n1_aggregated["period"] = "N-1"
                 
                 # 🔍 디버깅: 집계 후 값 확인
@@ -353,8 +358,14 @@ class PEGProcessingService:
                     (n1_aggregated['value'] == 0).sum(),
                     len(n1_aggregated)
                 )
+                if 'dimensions' in n1_aggregated.columns:
+                    logger.debug(
+                        "N-1 집계 후 dimensions 샘플: %s",
+                        n1_aggregated[['peg_name', 'dimensions']].head(5).to_dict('records')
+                    )
             else:
-                n1_aggregated = pd.DataFrame(columns=["peg_name", "value", "period"])
+                col_names = ["peg_name", "dimensions", "value", "period"] if 'dimensions' in n1_df.columns else ["peg_name", "value", "period"]
+                n1_aggregated = pd.DataFrame(columns=col_names)
 
             # N 기간 집계
             if not n_df.empty:
@@ -367,7 +378,9 @@ class PEGProcessingService:
                     len(n_df)
                 )
                 
-                n_aggregated = n_df.groupby("peg_name")["value"].mean().reset_index()
+                # dimensions가 있으면 함께 groupby
+                group_keys = ['peg_name', 'dimensions'] if 'dimensions' in n_df.columns else ['peg_name']
+                n_aggregated = n_df.groupby(group_keys)["value"].mean().reset_index()
                 n_aggregated["period"] = "N"
                 
                 # 🔍 디버깅: 집계 후 값 확인
@@ -378,8 +391,14 @@ class PEGProcessingService:
                     (n_aggregated['value'] == 0).sum(),
                     len(n_aggregated)
                 )
+                if 'dimensions' in n_aggregated.columns:
+                    logger.debug(
+                        "N 집계 후 dimensions 샘플: %s",
+                        n_aggregated[['peg_name', 'dimensions']].head(5).to_dict('records')
+                    )
             else:
-                n_aggregated = pd.DataFrame(columns=["peg_name", "value", "period"])
+                col_names = ["peg_name", "dimensions", "value", "period"] if 'dimensions' in n_df.columns else ["peg_name", "value", "period"]
+                n_aggregated = pd.DataFrame(columns=col_names)
 
             # 결합 및 변화율 계산
             combined_df = pd.concat([n1_aggregated, n_aggregated], ignore_index=True)
@@ -394,8 +413,9 @@ class PEGProcessingService:
                 )
                 
                 # pivot으로 N-1, N 기간을 컬럼으로 변환
-                # ⚠️ fillna(0) 제거 - 실제 null 값 보존하여 디버깅
-                pivot_df = combined_df.pivot(index="peg_name", columns="period", values="value")
+                # dimensions가 있으면 index에 포함
+                index_keys = ['peg_name', 'dimensions'] if 'dimensions' in combined_df.columns else ['peg_name']
+                pivot_df = combined_df.pivot(index=index_keys, columns="period", values="value")
                 
                 # 🔍 디버깅: pivot 후 null 값 확인
                 logger.debug(
@@ -493,8 +513,12 @@ class PEGProcessingService:
 
                 # 최종 형태로 변환
                 processed_df = pivot_df.reset_index()
+                # id_vars에 dimensions 포함 (있는 경우)
+                id_vars = ["peg_name", "change_pct"]
+                if "dimensions" in processed_df.columns:
+                    id_vars.append("dimensions")
                 processed_df = processed_df.melt(
-                    id_vars=["peg_name", "change_pct"],
+                    id_vars=id_vars,
                     value_vars=["N-1", "N"],
                     var_name="period",
                     value_name="avg_value",

@@ -586,11 +586,11 @@ class PostgreSQLRepository(DatabaseRepository):
 
             # 재귀적 JSONB 확장 (중첩된 index_name 구조 완전히 펼치기)
             # WITH RECURSIVE를 사용하여 모든 depth의 중첩 객체를 펼침
-            # 결과: path (차원 경로), peg_name (메트릭명), value (값)
+            # 결과: 차원 정보들(path_dimensions), peg_name (메트릭명), value (값)
             
             # CTE를 사용한 재귀 확장
-            # 1) 초기: 최상위 키-값 쌍 추출
-            # 2) 재귀: 객체면 계속 펼치고, 스칼라면 최종 값으로 수집
+            # 1) 초기: 최상위 키-값 쌍 추출 + index_name 수집
+            # 2) 재귀: 객체면 계속 펼치고 index_name 누적, 스칼라면 최종 값으로 수집
             recursive_cte = f"""
             WITH RECURSIVE flattened AS (
                 -- 초기: 최상위 values에서 키-값 쌍 추출
@@ -602,12 +602,8 @@ class PostgreSQLRepository(DatabaseRepository):
                     {"t." + relver_col + " AS rel_ver," if relver_col else ""}
                     kv.key AS path_key,
                     kv.value AS current_val,
-                    CASE 
-                        WHEN jsonb_typeof(kv.value) = 'object' 
-                        THEN jsonb_extract_path_text(kv.value, 'index_name')
-                        ELSE NULL 
-                    END AS index_name,
-                    ARRAY[kv.key] AS path_array,
+                    ARRAY[]::text[] AS dimension_names,  -- index_name 차원명 누적
+                    ARRAY[kv.key] AS dimension_values,    -- 차원값 누적
                     0 AS depth
                 FROM {table_name} t
                 CROSS JOIN LATERAL jsonb_each(t.{values_col}) AS kv(key, value)
@@ -615,7 +611,7 @@ class PostgreSQLRepository(DatabaseRepository):
                 
                 UNION ALL
                 
-                -- 재귀: 객체면 한 단계 더 펼치기
+                -- 재귀: 객체면 한 단계 더 펼치기 + index_name 누적
                 SELECT 
                     f.timestamp,
                     f.family_name,
@@ -624,12 +620,14 @@ class PostgreSQLRepository(DatabaseRepository):
                     {"f.rel_ver," if relver_col else ""}
                     kv.key AS path_key,
                     kv.value AS current_val,
+                    -- 현재 레벨의 index_name을 dimension_names 배열에 추가
                     CASE 
-                        WHEN jsonb_typeof(kv.value) = 'object' 
-                        THEN jsonb_extract_path_text(kv.value, 'index_name')
-                        ELSE NULL 
-                    END AS index_name,
-                    f.path_array || kv.key AS path_array,
+                        WHEN jsonb_typeof(f.current_val) = 'object' 
+                             AND jsonb_extract_path_text(f.current_val, 'index_name') IS NOT NULL
+                        THEN f.dimension_names || jsonb_extract_path_text(f.current_val, 'index_name')
+                        ELSE f.dimension_names
+                    END AS dimension_names,
+                    f.dimension_values || kv.key AS dimension_values,
                     f.depth + 1 AS depth
                 FROM flattened f
                 CROSS JOIN LATERAL jsonb_each(f.current_val) AS kv(key, value)
@@ -643,6 +641,7 @@ class PostgreSQLRepository(DatabaseRepository):
             params['max_recursion_depth'] = max_recursion_depth
             
             # 최종 SELECT: 리프 노드(스칼라 값)만 선택
+            # dimension_names와 dimension_values를 조합하여 차원 정보 구성
             select_parts: List[str] = [
                 "timestamp",
                 "family_name",
@@ -654,8 +653,13 @@ class PostgreSQLRepository(DatabaseRepository):
             if relver_col:
                 select_parts.append("rel_ver")
             
-            # peg_name: path_array를 역순으로 나열 (index_name들과 함께)
-            # 형식: "Dim1:val1,Dim2:val2,metric_name"
+            # 차원 정보: "CellIdentity=20,PLMN=0,gnb_ID=0,SPIDIncludingInvalid=0,QCI=0" 형식
+            select_parts.append(
+                "(SELECT string_agg(dimension_names[i] || '=' || dimension_values[i], ',') "
+                "FROM generate_subscripts(dimension_names, 1) AS i) AS dimensions"
+            )
+            
+            # peg_name: path_key (리프 노드의 키, 즉 실제 PEG 메트릭명)
             select_parts.append("path_key AS peg_name")
             
             # value: 스칼라 값을 숫자로 변환
@@ -686,25 +690,41 @@ class PostgreSQLRepository(DatabaseRepository):
             additional_conditions: List[str] = []
             
             if filters:
-                # 테이블 컬럼 기반 필터만 적용 (ne, swname 등)
                 for key, value in filters.items():
                     if value is None:
                         continue
-                    col_name = columns.get(key)
-                    if not col_name:
-                        continue
-                    # 차원 필터는 제외 (cellid, qci, bpu_id)
-                    if key in dimension_alias_map:
-                        continue
                     
-                    if isinstance(value, (list, tuple, set)) and value:
-                        placeholders = ",".join([f"%({key}_{i})s" for i, _ in enumerate(value)])
-                        additional_conditions.append(f"{key} IN ({placeholders})")
-                        for i, v in enumerate(value):
-                            params[f"{key}_{i}"] = v
+                    # 차원 필터 (cellid, qci, bpu_id) - dimensions 컬럼에서 검색
+                    if key in dimension_alias_map:
+                        dimension_key = dimension_alias_map[key]
+                        # dimensions 문자열에서 "CellIdentity=20" 형태로 검색
+                        if isinstance(value, (list, tuple, set)) and value:
+                            # 다중 값: dimensions에 포함되는지 OR 조건으로 검사
+                            or_conditions = []
+                            for i, v in enumerate(value):
+                                param_key = f"dim_{key}_{i}"
+                                or_conditions.append(f"dimensions LIKE %({param_key})s")
+                                params[param_key] = f"%{dimension_key}={v}%"
+                            additional_conditions.append(f"({' OR '.join(or_conditions)})")
+                        else:
+                            # 단일 값
+                            param_key = f"dim_{key}"
+                            additional_conditions.append(f"dimensions LIKE %({param_key})s")
+                            params[param_key] = f"%{dimension_key}={value}%"
                     else:
-                        additional_conditions.append(f"{key} = %({key})s")
-                        params[key] = value
+                        # 테이블 컬럼 기반 필터 (ne, swname 등)
+                        col_name = columns.get(key)
+                        if not col_name:
+                            continue
+                        
+                        if isinstance(value, (list, tuple, set)) and value:
+                            placeholders = ",".join([f"%({key}_{i})s" for i, _ in enumerate(value)])
+                            additional_conditions.append(f"{key} IN ({placeholders})")
+                            for i, v in enumerate(value):
+                                params[f"{key}_{i}"] = v
+                        else:
+                            additional_conditions.append(f"{key} = %({key})s")
+                            params[key] = value
 
             if additional_conditions:
                 query += " AND " + " AND ".join(additional_conditions)

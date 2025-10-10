@@ -72,21 +72,27 @@ class TimeRangeParser:
             timezone_config = settings.get_timezone_config_dict()
             app_timezone = timezone_config["app_timezone"]
 
-            # UTC가 아닌 경우 오프셋 계산 (간단한 매핑)
-            timezone_offsets = {
-                "UTC": "+00:00",
-                "Asia/Seoul": "+09:00",
-                "Asia/Tokyo": "+09:00",
-                "America/New_York": "-05:00",  # EST (간단화)
-                "Europe/London": "+00:00",  # GMT (간단화)
-            }
-            offset_text = timezone_offsets.get(app_timezone, "+00:00")  # 기본값을 UTC로 변경
-            logger.debug("Configuration Manager에서 타임존 오프셋: %s (from %s)", offset_text, app_timezone)
+            # 환경변수 DEFAULT_TZ_OFFSET 우선 확인
+            env_offset = os.getenv("DEFAULT_TZ_OFFSET")
+            if env_offset:
+                offset_text = env_offset.strip()
+                logger.debug("환경변수 DEFAULT_TZ_OFFSET 사용: %s", offset_text)
+            else:
+                # UTC가 아닌 경우 오프셋 계산 (간단한 매핑)
+                timezone_offsets = {
+                    "UTC": "+00:00",
+                    "Asia/Seoul": "+09:00",
+                    "Asia/Tokyo": "+09:00",
+                    "America/New_York": "-05:00",  # EST (간단화)
+                    "Europe/London": "+00:00",  # GMT (간단화)
+                }
+                offset_text = timezone_offsets.get(app_timezone, "+00:00")
+                logger.debug("Configuration Manager에서 타임존 오프셋: %s (from %s)", offset_text, app_timezone)
 
         except Exception as e:
-            # 폴백: 환경변수 직접 사용 (기본값도 UTC로 변경)
+            # 폴백: 환경변수 직접 사용 (환경변수 없으면 UTC 사용)
             offset_text = os.getenv("DEFAULT_TZ_OFFSET", "+00:00").strip()
-            logger.debug("타임존 오프셋 환경변수 (폴백): %s", offset_text)
+            logger.debug("타임존 오프셋 환경변수 (폴백): %s (DEFAULT_TZ_OFFSET=%s)", offset_text, os.getenv("DEFAULT_TZ_OFFSET"))
 
         try:
             # 부호 확인 (+ 또는 -)
