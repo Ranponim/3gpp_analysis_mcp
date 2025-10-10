@@ -317,6 +317,20 @@ class PostgreSQLRepository(DatabaseRepository):
         try:
             t0 = time.perf_counter()
             connection = self._pool.getconn()
+
+            # --- [수정] 환경변수(APP_TIMEZONE)를 읽어 세션 타임존 설정 ---
+            try:
+                settings = get_config_settings()
+                app_timezone = settings.app_timezone
+                if app_timezone:
+                    with connection.cursor() as cursor:
+                        # SQL 인젝션 방지를 위해 파라미터화된 쿼리 사용
+                        cursor.execute("SET TIME ZONE %(timezone)s", {'timezone': app_timezone})
+                    logger.debug("세션 타임존 설정 완료: %s", app_timezone)
+            except Exception as e:
+                logger.warning("세션 타임존 설정 중 오류 발생 (APP_TIMEZONE): %s", e)
+            # --- [수정] ---
+
             elapsed = (time.perf_counter() - t0) * 1000
             logger.debug("get_connection(): 연결 획득 완료 (%.1fms)", elapsed)
             yield connection
@@ -584,13 +598,33 @@ class PostgreSQLRepository(DatabaseRepository):
                 time_col, family_col, values_col, ne_col, swname_col, relver_col, dimension_alias_map
             )
 
+            # WHERE 조건 구성 (CTE Anchor용)
+            cte_anchor_conditions = [f"t.{time_col} BETWEEN %(start_time)s AND %(end_time)s"]
+            params['start_time'] = start_time
+            params['end_time'] = end_time
+
+            # ne_id 필터를 CTE anchor로 이동
+            if filters and 'ne' in filters and filters['ne']:
+                ne_values = filters['ne']
+                ne_col_name = columns.get('ne') or columns.get('ne_key') or 'ne_key'
+                
+                if isinstance(ne_values, (list, tuple, set)):
+                    # ne_id가 여러 개일 경우 IN 사용
+                    placeholders = ",".join([f"%(ne_filter_{i})s" for i, _ in enumerate(ne_values)])
+                    cte_anchor_conditions.append(f"t.{ne_col_name} IN ({placeholders})")
+                    for i, v in enumerate(ne_values):
+                        params[f"ne_filter_{i}"] = v
+                else:
+                    # ne_id가 단일 값일 경우
+                    cte_anchor_conditions.append(f"t.{ne_col_name} = %(ne_filter)s")
+                    params['ne_filter'] = ne_values
+                
+                # 처리된 필터는 나중에 중복 적용되지 않도록 제거
+                del filters['ne']
+
+            cte_anchor_where_clause = " AND ".join(cte_anchor_conditions)
+
             # 재귀적 JSONB 확장 (중첩된 index_name 구조 완전히 펼치기)
-            # WITH RECURSIVE를 사용하여 모든 depth의 중첩 객체를 펼침
-            # 결과: 차원 정보들(path_dimensions), peg_name (메트릭명), value (값)
-            
-            # CTE를 사용한 재귀 확장
-            # 1) 초기: 최상위 키-값 쌍 추출 + index_name 수집
-            # 2) 재귀: 객체면 계속 펼치고 index_name 누적, 스칼라면 최종 값으로 수집
             recursive_cte = f"""
             WITH RECURSIVE flattened AS (
                 -- 초기: 최상위 values에서 키-값 쌍 추출
@@ -602,12 +636,12 @@ class PostgreSQLRepository(DatabaseRepository):
                     {"t." + relver_col + " AS rel_ver," if relver_col else ""}
                     kv.key AS path_key,
                     kv.value AS current_val,
-                    ARRAY[]::text[] AS dimension_names,  -- index_name 차원명 누적
-                    ARRAY[kv.key] AS dimension_values,    -- 차원값 누적
+                    ARRAY[]::text[] AS dimension_names,
+                    ARRAY[kv.key] AS dimension_values,
                     0 AS depth
                 FROM {table_name} t
                 CROSS JOIN LATERAL jsonb_each(t.{values_col}) AS kv(key, value)
-                WHERE t.{time_col} BETWEEN %(start_time)s AND %(end_time)s
+                WHERE {cte_anchor_where_clause}
                 
                 UNION ALL
                 
@@ -682,9 +716,7 @@ class PostgreSQLRepository(DatabaseRepository):
             )
             logger.debug("fetch_peg_data(): 재귀 CTE 구성 완료 | select_parts=%s", select_parts)
 
-            # 시간 조건은 이미 CTE 내부에 포함됨
-            params['start_time'] = start_time
-            params['end_time'] = end_time
+
 
             # 추가 필터 (재귀 CTE 후 적용)
             additional_conditions: List[str] = []
