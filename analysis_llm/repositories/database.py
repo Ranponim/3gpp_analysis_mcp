@@ -622,6 +622,8 @@ class PostgreSQLRepository(DatabaseRepository):
                 # 처리된 필터는 나중에 중복 적용되지 않도록 제거
                 del filters['ne']
 
+            # index_name 키는 메타데이터이므로 모든 레벨에서 제외
+            cte_anchor_conditions.append("kv.key <> 'index_name'")
             cte_anchor_where_clause = " AND ".join(cte_anchor_conditions)
 
             # 재귀적 JSONB 확장 (중첩된 index_name 구조 완전히 펼치기)
