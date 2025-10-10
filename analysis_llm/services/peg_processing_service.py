@@ -9,15 +9,19 @@ PEG 관련 로직을 분리하여 단일 책임 원칙을 강화하고 재사용
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple, Union
+from collections import defaultdict
 
 import pandas as pd
 
+from config import get_settings
 from ..exceptions import ServiceError
 from ..repositories import DatabaseRepository
 from ..models.request import _DEFAULT_TABLE
 from .peg_service import PEGCalculator
+from ..utils.csv_filter_loader import load_peg_definitions_from_csv
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -140,6 +144,7 @@ class PEGProcessingService:
         time_ranges: Tuple[datetime, datetime, datetime, datetime],
         table_config: Dict[str, Any],
         filters: Dict[str, Any],
+        peg_filter: Dict[int, Set[str]],
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         데이터베이스에서 원시 PEG 데이터 조회
@@ -148,6 +153,7 @@ class PEGProcessingService:
             time_ranges (Tuple): (n1_start, n1_end, n_start, n_end)
             table_config (Dict[str, Any]): 테이블/컬럼 설정
             filters (Dict[str, Any]): 추가 필터 조건
+            peg_filter (Dict[int, Set[str]]): CSV에서 로드된 PEG 필터
 
         Returns:
             Tuple[pd.DataFrame, pd.DataFrame]: (n1_df, n_df)
@@ -176,13 +182,13 @@ class PEGProcessingService:
             # N-1 기간 데이터 조회
             logger.info("N-1 기간 데이터 조회: %s ~ %s", n1_start, n1_end)
             n1_data = self.database_repository.fetch_peg_data(
-                table_name=table_name, columns=columns, time_range=(n1_start, n1_end), filters=filters, limit=data_limit
+                table_name=table_name, columns=columns, time_range=(n1_start, n1_end), filters=filters, limit=data_limit, peg_filter=peg_filter
             )
 
             # N 기간 데이터 조회
             logger.info("N 기간 데이터 조회: %s ~ %s", n_start, n_end)
             n_data = self.database_repository.fetch_peg_data(
-                table_name=table_name, columns=columns, time_range=(n_start, n_end), filters=filters, limit=data_limit
+                table_name=table_name, columns=columns, time_range=(n_start, n_end), filters=filters, limit=data_limit, peg_filter=peg_filter
             )
 
             # DataFrame 변환
@@ -235,313 +241,187 @@ class PEGProcessingService:
 
         logger.info("원시 데이터 검증 완료: N-1=%d행, N=%d행", len(n1_df), len(n_df))
 
+    def _resolve_dependency_order(self, derived_pegs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        파생 PEG 간의 의존성을 분석하여 계산 순서를 결정합니다. (위상 정렬)
+
+        Args:
+            derived_pegs (List[Dict[str, Any]]): 파생 PEG 정의 리스트
+
+        Returns:
+            List[Dict[str, Any]]: 계산 순서대로 정렬된 파생 PEG 리스트
+
+        Raises:
+            PEGProcessingError: 순환 참조가 발견된 경우
+        """
+        if not derived_pegs:
+            return []
+
+        logger.debug("파생 PEG 의존성 분석 시작: %d개", len(derived_pegs))
+        
+        peg_map = {peg['output_peg']: peg for peg in derived_pegs}
+        
+        # 각 PEG의 의존성 수 계산
+        in_degree = {peg['output_peg']: 0 for peg in derived_pegs}
+        # 각 PEG이 어떤 다른 PEG들의 계산에 필요한지
+        adj = defaultdict(list)
+
+        all_peg_names = set(peg_map.keys())
+
+        for peg in derived_pegs:
+            output_peg = peg['output_peg']
+            for dep in peg['dependencies']:
+                if dep in all_peg_names: # 의존성이 다른 파생 PEG인 경우
+                    in_degree[output_peg] += 1
+                    adj[dep].append(output_peg)
+
+        # 진입 차수가 0인 PEG들을 큐에 추가
+        queue = [peg_name for peg_name, degree in in_degree.items() if degree == 0]
+        
+        sorted_order = []
+        while queue:
+            peg_name = queue.pop(0)
+            sorted_order.append(peg_map[peg_name])
+            
+            for dependent_peg in adj[peg_name]:
+                in_degree[dependent_peg] -= 1
+                if in_degree[dependent_peg] == 0:
+                    queue.append(dependent_peg)
+        
+        if len(sorted_order) != len(derived_pegs):
+            circular_deps = {p for p, d in in_degree.items() if d > 0}
+            raise PEGProcessingError(
+                "파생 PEG 정의에 순환 참조가 있습니다.",
+                processing_step="dependency_resolution",
+                details={"circular_dependencies": list(circular_deps)}
+            )
+            
+        logger.info("파생 PEG 계산 순서 결정 완료: %s", [p['output_peg'] for p in sorted_order])
+        return sorted_order
+
     def _process_with_calculator(
-        self, n1_df: pd.DataFrame, n_df: pd.DataFrame, peg_config: Dict[str, Any], filters: Dict[str, Any]
+        self, n1_df: pd.DataFrame, n_df: pd.DataFrame, peg_config: Dict[str, Any], filters: Dict[str, Any], derived_pegs: List[Dict[str, Any]]
     ) -> pd.DataFrame:
         """
-        PEGCalculator를 사용하여 데이터 처리 (식별자 보존)
+        PEGCalculator를 사용하여 데이터 처리 및 파생 PEG 계산
 
         Args:
             n1_df (pd.DataFrame): N-1 기간 데이터
             n_df (pd.DataFrame): N 기간 데이터
-            peg_config (Dict[str, Any]): PEG 설정 (미사용 시 빈 딕셔너리)
-            filters (Dict[str, Any]): 필터 조건 (cell_id 평균화 판단용)
+            peg_config (Dict[str, Any]): PEG 설정
+            filters (Dict[str, Any]): 필터 조건
+            derived_pegs (List[Dict[str, Any]]): 파생 PEG 정의 리스트
 
         Returns:
-            pd.DataFrame: 처리된 PEG 데이터 (식별자 컬럼 포함)
-
-        Raises:
-            PEGProcessingError: PEG 처리 실패 시
+            pd.DataFrame: 처리된 PEG 데이터 (파생 PEG 포함)
         """
         logger.debug("_process_with_calculator() 호출: PEGCalculator 처리 시작")
 
         try:
-            # ✨ 식별자 정보 추출 (집계 전 - DB 조회 값 보존)
+            # 식별자 정보 추출 (집계 전)
             metadata = {}
             source_df = n1_df if not n1_df.empty else n_df
-            
             if not source_df.empty:
                 first_row = source_df.iloc[0]
-                
-                # ne_key 추출 (DB가 'ne'로 반환)
-                if "ne" in source_df.columns:
-                    metadata["ne_key"] = str(first_row["ne"]) if pd.notna(first_row["ne"]) else None
-                
-                # swname 추출 (DB 컬럼명 그대로)
-                if "swname" in source_df.columns:
-                    metadata["swname"] = str(first_row["swname"]) if pd.notna(first_row["swname"]) else None
-                
-                # rel_ver 추출 (DB 컬럼명 그대로)
-                if "rel_ver" in source_df.columns:
-                    metadata["rel_ver"] = str(first_row["rel_ver"]) if pd.notna(first_row["rel_ver"]) else None
-                
-                # index_name 추출 (JSONB values 내부에 있을 수 있음)
-                if "index_name" in source_df.columns:
-                    metadata["index_name"] = str(first_row["index_name"]) if pd.notna(first_row["index_name"]) else None
-                
-                logger.debug(
-                    "식별자 추출 (집계 전): ne_key=%s, swname=%s, rel_ver=%s, index_name=%s",
-                    metadata.get("ne_key"),
-                    metadata.get("swname"),
-                    metadata.get("rel_ver"),
-                    metadata.get("index_name")
-                )
-            
-            # ✨ 요구사항 2: cell_id 필터 없으면 여러 cell 평균화
+                if "ne" in source_df.columns: metadata["ne_key"] = str(first_row["ne"]) if pd.notna(first_row["ne"]) else None
+                if "swname" in source_df.columns: metadata["swname"] = str(first_row["swname"]) if pd.notna(first_row["swname"]) else None
+                if "rel_ver" in source_df.columns: metadata["rel_ver"] = str(first_row["rel_ver"]) if pd.notna(first_row["rel_ver"]) else None
+                if "index_name" in source_df.columns: metadata["index_name"] = str(first_row["index_name"]) if pd.notna(first_row["index_name"]) else None
+
+            # cell_id 필터 없으면 여러 cell 평균화
             if 'cellid' not in filters or not filters.get('cellid'):
                 logger.info("cell_id 미지정 - 여러 cell 평균화 수행")
-                
                 for df_name, df in [("N-1", n1_df), ("N", n_df)]:
                     if not df.empty and 'dimensions' in df.columns:
-                        # dimensions에서 CellIdentity 차원 제거
-                        # 예: "PLMN=0,gnb_ID=0,CellIdentity=20,SPIDIncludingInvalid=0,QCI=0"
-                        # → "PLMN=0,gnb_ID=0,SPIDIncludingInvalid=0,QCI=0"
-                        original_count = len(df)
-                        df['dimensions'] = df['dimensions'].str.replace(
-                            r'CellIdentity=\d+,?',  # CellIdentity=숫자, 패턴
-                            '', 
-                            regex=True
-                        ).str.strip(',')  # 끝에 남은 쉼표 제거
-                        logger.debug(
-                            "%s 기간: dimensions에서 CellIdentity 제거 (행수: %d)",
-                            df_name, original_count
-                        )
-                
-                # 재집계 (cell이 제거된 dimensions 기준)
-                agg_columns = ['value']
-                first_columns = ['ne', 'swname', 'family_name']
+                        df['dimensions'] = df['dimensions'].str.replace(r'CellIdentity=\d+,?', '', regex=True).str.strip(',')
+                agg_cols = ['value']
+                first_cols = ['ne', 'swname', 'family_name']
                 if not n1_df.empty:
-                    logger.debug("N-1 재집계 전: %d행", len(n1_df))
                     group_keys = ['timestamp', 'peg_name', 'dimensions'] if 'dimensions' in n1_df.columns else ['timestamp', 'peg_name']
                     agg_dict = {'value': 'mean'}
-                    for col in first_columns:
-                        if col in n1_df.columns:
-                            agg_dict[col] = 'first'
+                    for col in first_cols: 
+                        if col in n1_df.columns: agg_dict[col] = 'first'
                     n1_df = n1_df.groupby(group_keys).agg(agg_dict).reset_index()
-                    logger.info("N-1 cell 평균화 완료: %d행", len(n1_df))
-                
                 if not n_df.empty:
-                    logger.debug("N 재집계 전: %d행", len(n_df))
                     group_keys = ['timestamp', 'peg_name', 'dimensions'] if 'dimensions' in n_df.columns else ['timestamp', 'peg_name']
                     agg_dict = {'value': 'mean'}
-                    for col in first_columns:
-                        if col in n_df.columns:
-                            agg_dict[col] = 'first'
+                    for col in first_cols:
+                        if col in n_df.columns: agg_dict[col] = 'first'
                     n_df = n_df.groupby(group_keys).agg(agg_dict).reset_index()
-                    logger.info("N cell 평균화 완료: %d행", len(n_df))
-            else:
-                logger.debug("cell_id 필터 존재 - cell 평균화 건너뜀")
+
+            # 기본 PEG 집계
+            group_keys = ['peg_name', 'dimensions'] if 'dimensions' in n1_df.columns else ['peg_name']
+            n1_aggregated = n1_df.groupby(group_keys)["value"].mean().reset_index() if not n1_df.empty else pd.DataFrame(columns=group_keys + ["value"])
+            n1_aggregated["period"] = "N-1"
             
-            # 간단한 집계 로직 (PEGCalculator 완전 통합 전 임시)
-            # dimensions 필드를 보존하면서 집계
-            # N-1 기간 집계
-            if not n1_df.empty:
-                # 🔍 디버깅: 원시 데이터의 value 컬럼 확인
-                logger.debug(
-                    "N-1 원시 데이터 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
-                    n1_df['value'].head(10).tolist() if 'value' in n1_df.columns else 'value 컬럼 없음',
-                    n1_df['value'].isnull().sum() if 'value' in n1_df.columns else 0,
-                    (n1_df['value'] == 0).sum() if 'value' in n1_df.columns else 0,
-                    len(n1_df)
-                )
-                
-                # dimensions가 있으면 함께 groupby
-                group_keys = ['peg_name', 'dimensions'] if 'dimensions' in n1_df.columns else ['peg_name']
-                n1_aggregated = n1_df.groupby(group_keys)["value"].mean().reset_index()
-                n1_aggregated["period"] = "N-1"
-                
-                # 🔍 디버깅: 집계 후 값 확인
-                logger.debug(
-                    "N-1 집계 후 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
-                    n1_aggregated['value'].head(10).tolist(),
-                    n1_aggregated['value'].isnull().sum(),
-                    (n1_aggregated['value'] == 0).sum(),
-                    len(n1_aggregated)
-                )
-                if 'dimensions' in n1_aggregated.columns:
-                    logger.debug(
-                        "N-1 집계 후 dimensions 샘플: %s",
-                        n1_aggregated[['peg_name', 'dimensions']].head(5).to_dict('records')
-                    )
-            else:
-                col_names = ["peg_name", "dimensions", "value", "period"] if 'dimensions' in n1_df.columns else ["peg_name", "value", "period"]
-                n1_aggregated = pd.DataFrame(columns=col_names)
+            group_keys = ['peg_name', 'dimensions'] if 'dimensions' in n_df.columns else ['peg_name']
+            n_aggregated = n_df.groupby(group_keys)["value"].mean().reset_index() if not n_df.empty else pd.DataFrame(columns=group_keys + ["value"])
+            n_aggregated["period"] = "N"
 
-            # N 기간 집계
-            if not n_df.empty:
-                # 🔍 디버깅: 원시 데이터의 value 컬럼 확인
-                logger.debug(
-                    "N 원시 데이터 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
-                    n_df['value'].head(10).tolist() if 'value' in n_df.columns else 'value 컬럼 없음',
-                    n_df['value'].isnull().sum() if 'value' in n_df.columns else 0,
-                    (n_df['value'] == 0).sum() if 'value' in n_df.columns else 0,
-                    len(n_df)
-                )
-                
-                # dimensions가 있으면 함께 groupby
-                group_keys = ['peg_name', 'dimensions'] if 'dimensions' in n_df.columns else ['peg_name']
-                n_aggregated = n_df.groupby(group_keys)["value"].mean().reset_index()
-                n_aggregated["period"] = "N"
-                
-                # 🔍 디버깅: 집계 후 값 확인
-                logger.debug(
-                    "N 집계 후 value 샘플: %s (null=%d개, 0=%d개, 총=%d개)",
-                    n_aggregated['value'].head(10).tolist(),
-                    n_aggregated['value'].isnull().sum(),
-                    (n_aggregated['value'] == 0).sum(),
-                    len(n_aggregated)
-                )
-                if 'dimensions' in n_aggregated.columns:
-                    logger.debug(
-                        "N 집계 후 dimensions 샘플: %s",
-                        n_aggregated[['peg_name', 'dimensions']].head(5).to_dict('records')
-                    )
-            else:
-                col_names = ["peg_name", "dimensions", "value", "period"] if 'dimensions' in n_df.columns else ["peg_name", "value", "period"]
-                n_aggregated = pd.DataFrame(columns=col_names)
-
-            # 결합 및 변화율 계산
             combined_df = pd.concat([n1_aggregated, n_aggregated], ignore_index=True)
+            if combined_df.empty:
+                return pd.DataFrame(columns=["peg_name", "period", "avg_value", "change_pct"])
 
-            # 변화율 계산 로직
-            if not combined_df.empty:
-                # 🔍 디버깅: pivot 전 combined_df 확인
-                logger.debug(
-                    "pivot 전 combined_df: shape=%s, 샘플 데이터=%s",
-                    combined_df.shape,
-                    combined_df.head(10).to_dict('records') if len(combined_df) > 0 else []
-                )
-                
-                # pivot으로 N-1, N 기간을 컬럼으로 변환
-                # dimensions가 있으면 index에 포함
-                index_keys = ['peg_name', 'dimensions'] if 'dimensions' in combined_df.columns else ['peg_name']
-                pivot_df = combined_df.pivot(index=index_keys, columns="period", values="value")
-                
-                # 🔍 디버깅: pivot 후 null 값 확인
-                logger.debug(
-                    "pivot 결과 (fillna 전): shape=%s, columns=%s, N-1_존재=%s, N_존재=%s",
-                    pivot_df.shape,
-                    list(pivot_df.columns),
-                    "N-1" in pivot_df.columns,
-                    "N" in pivot_df.columns
-                )
-                
-                if "N-1" in pivot_df.columns:
-                    logger.debug(
-                        "N-1 컬럼 통계: null=%d개, 0=%d개, 샘플 값=%s",
-                        pivot_df["N-1"].isnull().sum(),
-                        (pivot_df["N-1"] == 0).sum(),
-                        pivot_df["N-1"].head(10).tolist()
-                    )
-                
-                if "N" in pivot_df.columns:
-                    logger.debug(
-                        "N 컬럼 통계: null=%d개, 0=%d개, 샘플 값=%s",
-                        pivot_df["N"].isnull().sum(),
-                        (pivot_df["N"] == 0).sum(),
-                        pivot_df["N"].head(10).tolist()
-                    )
+            # --- [파생 PEG 계산 로직] ---
+            if derived_pegs:
+                logger.info("파생 PEG 계산 시작: %d개", len(derived_pegs))
+                # 파생 PEG 계산 시에는 dimensions를 고려하지 않음 (단순화를 위해)
+                # peg_name만으로 pivot하여 계산 후, 원래 데이터와 merge
+                simple_combined_df = combined_df.groupby(['peg_name', 'period'])['value'].mean().reset_index()
+                eval_df = simple_combined_df.pivot(index="period", columns="peg_name", values="value")
 
-                if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
-                    # ✅ 변화율 계산 개선
-                    # 1. N-1이 0인 경우 체크 (division by zero 방지)
-                    zero_n1_mask = (pivot_df["N-1"] == 0)
-                    null_n1_mask = pivot_df["N-1"].isnull()
-                    null_n_mask = pivot_df["N"].isnull()
-                    
-                    zero_n1_count = zero_n1_mask.sum()
-                    null_n1_count = null_n1_mask.sum()
-                    null_n_count = null_n_mask.sum()
-                    
-                    logger.debug(
-                        "변화율 계산 전: N-1=0인 PEG=%d개, N-1=null인 PEG=%d개, N=null인 PEG=%d개",
-                        zero_n1_count, null_n1_count, null_n_count
-                    )
-                    
-                    # 2. 변화율 계산 (null 값 보존)
-                    # N-1이나 N이 null이면 변화율도 null로 처리
-                    # N-1이 0이면 변화율 계산 불가 (0으로 나누기) -> null 처리
-                    pivot_df["change_pct"] = None  # 초기화
-                    
-                    # 유효한 데이터만 계산 (N-1, N 모두 존재하고, N-1이 0이 아님)
-                    valid_mask = (~null_n1_mask) & (~null_n_mask) & (~zero_n1_mask)
-                    
-                    if valid_mask.sum() > 0:
-                        pivot_df.loc[valid_mask, "change_pct"] = (
-                            (pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) 
-                            / pivot_df.loc[valid_mask, "N-1"] 
-                            * 100
-                        )
-                        logger.info(
-                            "변화율 계산 완료: %d개 PEG (유효 데이터만 계산)",
-                            valid_mask.sum()
-                        )
-                    else:
-                        logger.warning("유효한 데이터가 없어 변화율을 계산할 수 없습니다!")
-                    
-                    # N-1이 0인 경우 경고 (변화율 계산 불가)
-                    if zero_n1_count > 0:
-                        logger.warning(
-                            "N-1 값이 0인 PEG가 %d개 있습니다 (변화율 계산 불가, null 처리)",
-                            zero_n1_count
-                        )
-                        # N-1=0인 PEG 목록 출력 (최대 10개)
-                        zero_pegs = pivot_df[zero_n1_mask].head(10).index.tolist()
-                        logger.debug("N-1=0인 PEG 샘플: %s", zero_pegs)
-                    
-                    # null 값이 있는 경우 경고
-                    if null_n1_count > 0 or null_n_count > 0:
-                        logger.warning(
-                            "데이터 누락: N-1=null인 PEG=%d개, N=null인 PEG=%d개",
-                            null_n1_count, null_n_count
-                        )
-                    
-                    # change_pct 통계 출력 (디버깅)
-                    non_zero_changes = (pivot_df["change_pct"] != 0).sum()
-                    if len(pivot_df) > 0:
-                        sample_pegs = pivot_df.head(5)
-                        logger.debug(
-                            "change_pct 계산 완료: 총=%d, 0이_아닌_값=%d개, 샘플_PEG=%s",
-                            len(pivot_df),
-                            non_zero_changes,
-                            [(idx, row["N-1"], row["N"], row["change_pct"]) 
-                             for idx, row in sample_pegs.iterrows()]
-                        )
-                else:
-                    logger.warning("pivot 결과에 N-1 또는 N 컬럼이 없습니다! change_pct를 0으로 설정")
-                    pivot_df["change_pct"] = 0
+                sorted_derived_pegs = self._resolve_dependency_order(derived_pegs)
 
-                # 최종 형태로 변환
-                processed_df = pivot_df.reset_index()
-                # id_vars에 dimensions 포함 (있는 경우)
-                id_vars = ["peg_name", "change_pct"]
-                if "dimensions" in processed_df.columns:
-                    id_vars.append("dimensions")
-                processed_df = processed_df.melt(
-                    id_vars=id_vars,
-                    value_vars=["N-1", "N"],
-                    var_name="period",
-                    value_name="avg_value",
-                )
+                for peg_def in sorted_derived_pegs:
+                    output_peg = peg_def['output_peg']
+                    formula = peg_def['formula']
+                    try:
+                        eval_df[output_peg] = eval_df.eval(formula, engine='python')
+                        logger.debug("파생 PEG 계산 성공: %s", output_peg)
+                    except Exception as e:
+                        logger.warning("파생 PEG '%s' 계산 실패. 수식: '%s'. 오류: %s", output_peg, formula, e)
+                        eval_df[output_peg] = pd.NA
+
+                # 계산된 파생 PEG를 long format으로 변환
+                derived_peg_names = [p['output_peg'] for p in derived_pegs if p['output_peg'] in eval_df.columns]
+                if derived_peg_names:
+                    derived_df_long = eval_df[derived_peg_names].reset_index().melt(
+                        id_vars=['period'], var_name='peg_name', value_name='value'
+                    )
+                    # 기존 데이터와 파생 데이터 결합
+                    combined_df = pd.concat([combined_df, derived_df_long], ignore_index=True)
+                    logger.info("파생 PEG 데이터 결합 완료: %d개", len(derived_peg_names))
+            # --- [계산 로직 완료] ---
+
+            # 변화율 계산
+            index_keys = ['peg_name', 'dimensions'] if 'dimensions' in combined_df.columns else ['peg_name']
+            pivot_df = combined_df.pivot_table(index=index_keys, columns="period", values="value", aggfunc='mean')
+
+            if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
+                valid_mask = (pivot_df["N-1"].notna()) & (pivot_df["N"].notna()) & (pivot_df["N-1"] != 0)
+                pivot_df["change_pct"] = None
+                if valid_mask.sum() > 0:
+                    pivot_df.loc[valid_mask, "change_pct"] = ((pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) / pivot_df.loc[valid_mask, "N-1"] * 100)
             else:
-                logger.warning("combined_df가 비어있습니다!")
-                processed_df = pd.DataFrame(columns=["peg_name", "period", "avg_value", "change_pct"])
-            
-            # ✨ 식별자 정보를 모든 행에 추가 (DB 조회 값 보존)
+                pivot_df["change_pct"] = 0
+
+            # 최종 형태로 변환
+            processed_df = pivot_df.reset_index()
+            id_vars = [key for key in index_keys] + ["change_pct"]
+            value_vars = [col for col in ["N-1", "N"] if col in processed_df.columns]
+            processed_df = processed_df.melt(
+                id_vars=id_vars,
+                value_vars=value_vars,
+                var_name="period",
+                value_name="avg_value",
+            )
+
+            # 식별자 정보를 모든 행에 추가
             if metadata:
                 for key, value in metadata.items():
-                    if value is not None:
-                        processed_df[key] = value
-                        logger.debug("컬럼 추가: %s=%s", key, value)
+                    if value is not None: processed_df[key] = value
 
-            logger.info(
-                "PEGCalculator 처리 완료: %d행 (식별자 보존: ne_key=%s, swname=%s, rel_ver=%s, index_name=%s)",
-                len(processed_df),
-                metadata.get("ne_key"),
-                metadata.get("swname"),
-                metadata.get("rel_ver"),
-                metadata.get("index_name")
-            )
+            logger.info("PEGCalculator 처리 완료: %d행", len(processed_df))
             return processed_df
 
         except Exception as e:
@@ -557,6 +437,7 @@ class PEGProcessingService:
         table_config: Dict[str, Any],
         filters: Dict[str, Any],
         peg_config: Optional[Dict[str, Any]] = None,
+        request_context: Optional[Dict[str, Any]] = None,
     ) -> pd.DataFrame:
         """
         전체 PEG 데이터 처리 워크플로우 실행
@@ -566,6 +447,7 @@ class PEGProcessingService:
             table_config (Dict[str, Any]): 테이블/컬럼 설정
             filters (Dict[str, Any]): 필터 조건
             peg_config (Optional[Dict[str, Any]]): PEG 설정
+            request_context (Optional[Dict[str, Any]]): API 요청 컨텍스트 (CSV 경로 재정의용)
 
         Returns:
             pd.DataFrame: 처리된 PEG 데이터
@@ -574,6 +456,23 @@ class PEGProcessingService:
             PEGProcessingError: 처리 실패 시
         """
         logger.info("process_peg_data() 호출: PEG 데이터 처리 워크플로우 시작")
+
+        # --- [CSV 필터 로직 수정] ---
+        settings = get_settings()
+        db_filter = {}
+        derived_pegs = []
+        if settings.peg_filter_enabled:
+            request_context = request_context or {}
+            filter_file_override = request_context.get("peg_filter_file")
+            filename_to_use = filter_file_override if filter_file_override else settings.peg_filter_default_file
+            full_csv_path = os.path.join(settings.peg_filter_dir_path, filename_to_use)
+            
+            # 확장된 로더 호출
+            db_filter, derived_pegs = load_peg_definitions_from_csv(full_csv_path)
+            logger.info("CSV 로드: DB필터 %d families, 파생PEG %d개", len(db_filter), len(derived_pegs))
+        else:
+            logger.debug("CSV 필터링 기능이 비활성화되어 있습니다.")
+        # --- [수정 완료] ---
 
         try:
             # 1단계: 시간 범위 검증
@@ -589,7 +488,7 @@ class PEGProcessingService:
 
             # 2단계: 원시 데이터 조회
             logger.info("2단계: 원시 데이터 조회")
-            n1_df, n_df = self._retrieve_raw_peg_data(time_ranges, table_config, filters)
+            n1_df, n_df = self._retrieve_raw_peg_data(time_ranges, table_config, filters, peg_filter=db_filter)
             logger.debug(
                 "원시 데이터 조회 결과: N-1 rows=%d, N rows=%d", len(n1_df), len(n_df)
             )
@@ -598,9 +497,9 @@ class PEGProcessingService:
             logger.info("3단계: 원시 데이터 검증")
             self._validate_raw_data(n1_df, n_df)
 
-            # 4단계: PEGCalculator 처리
-            logger.info("4단계: PEGCalculator 처리")
-            processed_df = self._process_with_calculator(n1_df, n_df, peg_config or {}, filters)
+            # 4단계: PEGCalculator 및 파생 PEG 처리
+            logger.info("4단계: PEGCalculator 및 파생 PEG 처리")
+            processed_df = self._process_with_calculator(n1_df, n_df, peg_config or {}, filters, derived_pegs=derived_pegs)
             logger.debug(
                 "PEGCalculator 처리 결과: 행수=%d, 컬럼=%s",
                 len(processed_df),

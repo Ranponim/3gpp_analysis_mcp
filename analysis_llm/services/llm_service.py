@@ -298,37 +298,27 @@ class SpecificPEGsAnalysisPromptStrategy(BasePromptStrategy):
         processed_df: pd.DataFrame,
         n1_range: str,
         n_range: str,
-        selected_pegs: Optional[List[str]] = None,
         **kwargs,
     ) -> str:
         """특정 PEG 전용 분석 프롬프트 생성"""
-        logger.info("SpecificPEGsAnalysisPromptStrategy.build_prompt() 호출: PEG=%s", selected_pegs)
+        logger.info("SpecificPEGsAnalysisPromptStrategy.build_prompt() 호출")
 
         if not self.validate_input_data(processed_df):
             raise LLMAnalysisError("입력 데이터가 유효하지 않습니다", analysis_type=self.get_strategy_name())
 
-        if not selected_pegs:
+        if processed_df.empty:
             raise LLMAnalysisError(
-                "특정 PEG 분석을 위해서는 selected_pegs가 필요합니다", analysis_type=self.get_strategy_name()
-            )
-
-        # 선택된 PEG만 필터링
-        filtered_df = processed_df[processed_df["peg_name"].isin(selected_pegs)].copy()
-
-        if filtered_df.empty:
-            raise LLMAnalysisError(
-                f"선택된 PEG({selected_pegs})에 해당하는 데이터가 없습니다",
+                f"분석할 PEG 데이터가 없습니다.",
                 analysis_type=self.get_strategy_name(),
-                details={"selected_pegs": selected_pegs},
             )
 
         # 데이터 포맷팅
         preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
-        preview_df = filtered_df.head(preview_rows)
+        preview_df = processed_df.head(preview_rows)
         data_preview = self.format_dataframe_for_prompt(preview_df)
 
-        # 선택된 PEG 목록
-        pegs_list = ", ".join(selected_pegs)
+        # 선택된 PEG 목록 (DataFrame에서 직접 추출)
+        pegs_list = ", ".join(processed_df["peg_name"].unique())
 
         # 프롬프트 구성
         prompt = f"""
@@ -377,7 +367,7 @@ class SpecificPEGsAnalysisPromptStrategy(BasePromptStrategy):
 4. 특화된 최적화 방안 제시
 """
 
-        logger.info("특정 PEG 분석 프롬프트 생성 완료: %d자 (PEG: %d개)", len(prompt), len(selected_pegs))
+        logger.info("특정 PEG 분석 프롬프트 생성 완료: %d자 (PEG: %d개)", len(prompt), len(processed_df["peg_name"].unique()))
         return prompt
 
 
@@ -428,7 +418,6 @@ class LLMAnalysisService:
         n1_range: str,
         n_range: str,
         analysis_type: str = "enhanced",
-        selected_pegs: Optional[List[str]] = None,
         enable_mock: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
@@ -440,7 +429,6 @@ class LLMAnalysisService:
             n1_range (str): N-1 기간 문자열
             n_range (str): N 기간 문자열
             analysis_type (str): 분석 유형 ('overall', 'enhanced', 'specific')
-            selected_pegs (Optional[List[str]]): 특정 PEG 분석용 PEG 목록
             enable_mock (bool): 모킹 모드 활성화
             **kwargs: 추가 매개변수
 
@@ -466,11 +454,7 @@ class LLMAnalysisService:
 
         try:
             # 프롬프트 생성
-            prompt_kwargs = kwargs.copy()
-            if analysis_type == "specific" and selected_pegs:
-                prompt_kwargs["selected_pegs"] = selected_pegs
-
-            prompt = strategy.build_prompt(processed_df, n1_range, n_range, **prompt_kwargs)
+            prompt = strategy.build_prompt(processed_df, n1_range, n_range, **kwargs)
 
             # 프롬프트 검증
             if not self.llm_repository.validate_prompt(prompt):

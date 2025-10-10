@@ -1,0 +1,4 @@
+family_id,peg_name,define
+100,RandomAccessPreamble,
+100,RandomAccessResponse,
+,,"RandomAccessSucc.=(RandomAccessPreamble/RandomAccessResponse)*100"

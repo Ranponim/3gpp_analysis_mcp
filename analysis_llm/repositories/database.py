@@ -519,6 +519,7 @@ class PostgreSQLRepository(DatabaseRepository):
         time_range: Tuple[datetime, datetime],
         filters: Optional[Dict[str, Any]] = None,
         limit: Optional[int] = None,
+        peg_filter: Optional[Dict[int, Set[str]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         PEG 데이터 전용 조회 메서드 (기존 main.py 로직 기반)
@@ -600,6 +601,19 @@ class PostgreSQLRepository(DatabaseRepository):
 
             # WHERE 조건 구성 (CTE Anchor용)
             cte_anchor_conditions = [f"t.{time_col} BETWEEN %(start_time)s AND %(end_time)s"]
+
+            # --- [CSV 필터 로직 추가] ---
+            # 1. family_id 필터링
+            if peg_filter:
+                family_ids_to_filter = list(peg_filter.keys())
+                if family_ids_to_filter:
+                    # family_col은 family_id를 가리키는 실제 DB 컬럼명
+                    placeholders = ",".join([f"%(family_filter_{i})s" for i, _ in enumerate(family_ids_to_filter)])
+                    cte_anchor_conditions.append(f"t.{family_col} IN ({placeholders})")
+                    for i, v in enumerate(family_ids_to_filter):
+                        params[f"family_filter_{i}"] = v
+                    logger.info("CSV 필터 적용: %d개 family_id로 필터링", len(family_ids_to_filter))
+            # --- [로직 추가 완료] ---
             params['start_time'] = start_time
             params['end_time'] = end_time
 
@@ -722,6 +736,34 @@ class PostgreSQLRepository(DatabaseRepository):
 
             # 추가 필터 (재귀 CTE 후 적용)
             additional_conditions: List[str] = []
+
+            # --- [CSV 필터 로직 추가] ---
+            # 2. peg_name 필터링
+            if peg_filter:
+                peg_name_filter_clauses = []
+                # 각 family_id와 peg_name 목록에 대해 OR 조건 생성
+                for i, (family_id, peg_names) in enumerate(peg_filter.items()):
+                    if not peg_names:
+                        continue
+                    
+                    family_param_key = f"csv_family_{i}"
+                    peg_list_param_keys = [f"csv_peg_{i}_{j}" for j in range(len(peg_names))]
+                    
+                    peg_placeholders = ", ".join([f"%({key})s" for key in peg_list_param_keys])
+                    
+                    # (family_name = %s AND path_key IN (%s, %s, ...))
+                    clause = f"(family_name = %({family_param_key})s AND path_key IN ({peg_placeholders}))"
+                    peg_name_filter_clauses.append(clause)
+                    
+                    # 파라미터 추가
+                    params[family_param_key] = family_id
+                    for key, name in zip(peg_list_param_keys, peg_names):
+                        params[key] = name
+                
+                if peg_name_filter_clauses:
+                    additional_conditions.append(f"({' OR '.join(peg_name_filter_clauses)})")
+                    logger.info("CSV 필터 적용: %d개 family/peg 조합으로 필터링", len(peg_name_filter_clauses))
+            # --- [로직 추가 완료] ---
             
             if filters:
                 for key, value in filters.items():

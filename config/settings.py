@@ -277,6 +277,11 @@ class Settings(BaseSettings):
     peg_default_time_window: str = Field(default="1h", env="PEG_DEFAULT_TIME_WINDOW")
     peg_max_formula_complexity: int = Field(default=100, env="PEG_MAX_FORMULA_COMPLEXITY")
     peg_use_choi: bool = Field(default=False, env="PEG_USE_CHOI")
+
+    # CSV 기반 PEG 필터링 설정
+    peg_filter_enabled: bool = Field(default=False, env="PEG_FILTER_ENABLED", description="CSV 필터링 활성화")
+    peg_filter_dir_path: str = Field(default="config/peg_filters/", env="PEG_FILTER_DIR_PATH", description="PEG 필터 CSV 파일 디렉토리")
+    peg_filter_default_file: str = Field(default="default.csv", env="PEG_FILTER_DEFAULT_FILE", description="기본 PEG 필터 파일명")
     
     # JSONB 파싱 설정
     jsonb_max_recursion_depth: int = Field(default=5, env="JSONB_MAX_RECURSION_DEPTH", description="JSONB 재귀 파싱 최대 깊이")

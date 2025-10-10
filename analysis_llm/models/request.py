@@ -85,7 +85,8 @@ class FilterConfig:
     cell: Optional[Union[str, List[str]]] = None  # cellid의 별칭
     host: Optional[Union[str, List[str]]] = None
     preference: Optional[Union[str, List[str]]] = None
-    selected_pegs: Optional[List[str]] = None
+
+    peg_filter_file: Optional[str] = None  # CSV 필터 파일명 (재정의용)
 
     def __post_init__(self):
         """필터 설정 정규화"""
@@ -205,7 +206,8 @@ class AnalysisRequest:
             cell=data.get("cell"),
             host=data.get("host"),
             preference=data.get("preference"),
-            selected_pegs=data.get("selected_pegs"),
+
+            peg_filter_file=data.get("peg_filter_file"),
         )
 
         # PEG 설정
@@ -254,6 +256,7 @@ class AnalysisRequest:
             "cellid": self.filter_config.cellid,
             "host": self.filter_config.host,
             "preference": self.filter_config.preference,
-            "selected_pegs": self.filter_config.selected_pegs,
+
+            "peg_filter_file": self.filter_config.peg_filter_file,
             "peg_definitions": self.peg_config.peg_definitions,
         }
