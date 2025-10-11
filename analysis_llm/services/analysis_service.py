@@ -506,16 +506,12 @@ class AnalysisService:
                 peg_config = {"aggregation_method": "mean", "derived_pegs": request.get("peg_definitions", {})}
 
                 try:
-                    # 요청 컨텍스트 생성 (CSV 필터 파일 재정의용)
-                    request_context = {
-                        "peg_filter_file": request.get("peg_filter_file")
-                    }
+                    # PEG 데이터 처리
                     processed_df = self.peg_processing_service.process_peg_data(
                         time_ranges=time_ranges,
                         table_config=table_config,
                         filters=request.get("filters", {}),
                         peg_config=peg_config,
-                        request_context=request_context,
                     )
                 except PEGProcessingError as e:
                     raise AnalysisServiceError(
