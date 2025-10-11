@@ -718,22 +718,27 @@ class PostgreSQLRepository(DatabaseRepository):
             # peg_name: path_key (리프 노드의 키, 즉 실제 PEG 메트릭명)
             select_parts.append("path_key AS peg_name")
             
-            # value: 숫자면 숫자로, 문자면 그대로 유지 (간단한 접근)
-            # - 숫자 타입이거나 숫자로 시작하는 문자열 → 숫자 변환 시도
-            # - 그 외(null, -, NA, N/D 등) → 원본 텍스트 유지
+            # value: 숫자면 숫자로, 문자면 그대로 유지
+            # - JSONB number 타입 → 숫자로 변환
+            # - JSONB string 타입이고 숫자로 시작 → 숫자 변환 시도
+            # - 그 외(null, -, NA, N/D 등) → NULL (text_value에 보존)
+            # 
+            # 🔑 중요: current_val#>>'{}'는 JSONB 값을 따옴표 없이 텍스트로 추출
+            # 예: JSONB "266510.50" → 텍스트 266510.50 (따옴표 제거!)
             select_parts.append(
                 "CASE "
                 "  WHEN jsonb_typeof(current_val) = 'number' THEN (current_val::text)::double precision "
-                "  WHEN jsonb_typeof(current_val) = 'string' AND current_val::text ~ '^\\s*[+-]?\\d' "
-                "    THEN (regexp_replace(current_val::text, '[^0-9\\.\\-eE]', '', 'g'))::double precision "
+                "  WHEN jsonb_typeof(current_val) = 'string' AND (current_val#>>'{}') ~ '^\\s*[+-]?\\d' "
+                "    THEN (regexp_replace(current_val#>>'{}', '[^0-9\\.\\-eE]', '', 'g'))::double precision "
                 "  ELSE NULL "
                 "END AS value"
             )
             
             # 원본 텍스트 값 보존 (null, -, NA, N/D 등 의미 있는 문자)
+            # 🔑 current_val#>>'{}'로 따옴표 없이 추출
             select_parts.append(
                 "CASE "
-                "  WHEN jsonb_typeof(current_val) IN ('number', 'string') THEN current_val::text "
+                "  WHEN jsonb_typeof(current_val) IN ('number', 'string') THEN current_val#>>'{}' "
                 "  ELSE NULL "
                 "END AS text_value"
             )
