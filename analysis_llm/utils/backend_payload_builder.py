@@ -110,14 +110,19 @@ class BackendPayloadBuilder:
             "LLM 분석 원본 키: %s",
             list(llm_data_raw.keys()) if isinstance(llm_data_raw, dict) else type(llm_data_raw).__name__
         )
-        logger.debug(
-            "추출된 llm_analysis: summary=%s, issues=%d개, recommendations=%d개, confidence=%s, model=%s",
-            "있음" if llm_analysis.get("summary") else "없음",
-            len(llm_analysis.get("issues", [])),
-            len(llm_analysis.get("recommendations", [])),
-            llm_analysis.get("confidence"),
-            llm_analysis.get("model_name")
-        )
+        
+        # llm_analysis가 None일 수 있으므로 안전하게 처리
+        if llm_analysis and isinstance(llm_analysis, dict):
+            logger.debug(
+                "추출된 llm_analysis: summary=%s, issues=%d개, recommendations=%d개, confidence=%s, model=%s",
+                "있음" if llm_analysis.get("summary") else "없음",
+                len(llm_analysis.get("issues", [])),
+                len(llm_analysis.get("recommendations", [])),
+                llm_analysis.get("confidence"),
+                llm_analysis.get("model_name")
+            )
+        else:
+            logger.warning("llm_analysis가 None이거나 dict가 아닙니다: type=%s", type(llm_analysis).__name__)
         
         # PEG 비교 결과 추출
         peg_comparisons = BackendPayloadBuilder._extract_peg_comparisons(
@@ -316,9 +321,12 @@ class BackendPayloadBuilder:
             []
         )
         
+        # issues도 None일 수 있으므로 안전하게 처리
+        issues = llm_data.get("issues") or []
+        
         return {
             "summary": llm_data.get("summary"),
-            "issues": llm_data.get("issues", []),
+            "issues": issues,
             "recommendations": recommendations,
             "confidence": llm_data.get("confidence"),
             "model_name": llm_data.get("model")
