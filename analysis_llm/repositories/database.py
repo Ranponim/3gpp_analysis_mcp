@@ -718,7 +718,7 @@ class PostgreSQLRepository(DatabaseRepository):
             # peg_name: path_key (리프 노드의 키, 즉 실제 PEG 메트릭명)
             select_parts.append("path_key AS peg_name")
             
-            # value: 숫자면 숫자로, 문자면 그대로 유지
+            # value: 숫자면 숫자로, 문자면 NULL
             # - JSONB number 타입 → 숫자로 변환
             # - JSONB string 타입이고 숫자로 시작 → 숫자 변환 시도
             # - 그 외(null, -, NA, N/D 등) → NULL (text_value에 보존)
@@ -734,11 +734,21 @@ class PostgreSQLRepository(DatabaseRepository):
                 "END AS value"
             )
             
-            # 원본 텍스트 값 보존 (null, -, NA, N/D 등 의미 있는 문자)
-            # 🔑 current_val#>>'{}'로 따옴표 없이 추출
+            # text_value: 숫자로 파싱 실패한 경우에만 값 보존 (NA, -, N/D, null 등)
+            # - 숫자로 파싱 성공 시 → NULL (중복 방지)
+            # - 숫자가 아닌 텍스트 → 원본 보존 (디버깅/분석용)
+            # 
+            # 🎯 목적: value와 text_value가 동시에 값을 갖지 않도록 함
+            # 예: value=266510.50, text_value=NULL ✅
+            #     value=NULL, text_value='NA' ✅
             select_parts.append(
                 "CASE "
-                "  WHEN jsonb_typeof(current_val) IN ('number', 'string') THEN current_val#>>'{}' "
+                "  WHEN jsonb_typeof(current_val) = 'number' THEN NULL "  # 숫자 타입이면 text_value는 NULL
+                "  WHEN jsonb_typeof(current_val) = 'string' THEN "
+                "    CASE "
+                "      WHEN (current_val#>>'{}') ~ '^\\s*[+-]?\\d' THEN NULL "  # 숫자로 파싱 가능하면 NULL
+                "      ELSE current_val#>>'{}' "  # 숫자가 아니면 텍스트 보존 (NA, -, N/D 등)
+                "    END "
                 "  ELSE NULL "
                 "END AS text_value"
             )
