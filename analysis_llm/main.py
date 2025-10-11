@@ -618,9 +618,9 @@ class MCPHandler:
             # 폴백: 최소 필수 필드만 포함
             filters = analysis_request.get("filters", {})
             return {
-                "ne_id": str(filters.get("ne", ["unknown"])[0] if isinstance(filters.get("ne"), list) else filters.get("ne", "unknown")),
-                "cell_id": str(filters.get("cellid", ["unknown"])[0] if isinstance(filters.get("cellid"), list) else filters.get("cellid", "unknown")),
-                "swname": "unknown",
+                "ne_id": str(filters.get("ne", ["All NEs"])[0] if isinstance(filters.get("ne"), list) else filters.get("ne", "All NEs")),
+                "cell_id": str(filters.get("cellid", ["All cells"])[0] if isinstance(filters.get("cellid"), list) else filters.get("cellid", "All cells")),
+                "swname": "All hosts",
                 "analysis_period": {
                     "n_minus_1_start": "unknown",
                     "n_minus_1_end": "unknown",

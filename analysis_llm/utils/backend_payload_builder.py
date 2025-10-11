@@ -43,27 +43,27 @@ class BackendPayloadBuilder:
         columns = analysis_request.get("columns", {})
         db_identifiers = analysis_result.get("db_identifiers", {})
         
-        # ne_id: DB > filters > "unknown"
+        # ne_id: DB > filters > "All NEs" (기본값)
         ne_id = (
             db_identifiers.get("ne_id") or
             BackendPayloadBuilder._extract_identifier(filters.get("ne")) or
-            "unknown"
+            "All NEs"
         )
         
-        # cell_id: DB > filters > "unknown"
+        # cell_id: DB > filters > "All cells" (기본값)
         cell_id = (
             db_identifiers.get("cell_id") or
             BackendPayloadBuilder._extract_identifier(filters.get("cellid")) or
-            "unknown"
+            "All cells"
         )
         
-        # swname: DB > filters(swname) > "unknown"
+        # swname: DB > filters(swname) > "All hosts"
         swname = (
             db_identifiers.get("swname") or
             BackendPayloadBuilder._extract_identifier(
                 filters.get("swname")
             ) or
-            "unknown"
+            "All hosts"
         )
         
         # rel_ver: filters만 사용 (DB에 저장되지 않음)
@@ -102,6 +102,21 @@ class BackendPayloadBuilder:
         # LLM 분석 결과 추출
         llm_analysis = BackendPayloadBuilder._extract_llm_analysis(
             analysis_result
+        )
+        
+        # LLM 분석 키 디버깅
+        llm_data_raw = analysis_result.get("llm_analysis", {})
+        logger.debug(
+            "LLM 분석 원본 키: %s",
+            list(llm_data_raw.keys()) if isinstance(llm_data_raw, dict) else type(llm_data_raw).__name__
+        )
+        logger.debug(
+            "추출된 llm_analysis: summary=%s, issues=%d개, recommendations=%d개, confidence=%s, model=%s",
+            "있음" if llm_analysis.get("summary") else "없음",
+            len(llm_analysis.get("issues", [])),
+            len(llm_analysis.get("recommendations", [])),
+            llm_analysis.get("confidence"),
+            llm_analysis.get("model_name")
         )
         
         # PEG 비교 결과 추출
@@ -293,10 +308,18 @@ class BackendPayloadBuilder:
         """
         llm_data = analysis_result.get("llm_analysis", {})
         
+        # recommendations 키 매핑 (여러 가능한 키 이름 지원)
+        recommendations = (
+            llm_data.get("recommendations") or
+            llm_data.get("recommended_actions") or
+            llm_data.get("key_findings") or
+            []
+        )
+        
         return {
             "summary": llm_data.get("summary"),
             "issues": llm_data.get("issues", []),
-            "recommendations": llm_data.get("recommended_actions", []),
+            "recommendations": recommendations,
             "confidence": llm_data.get("confidence"),
             "model_name": llm_data.get("model")
         }
