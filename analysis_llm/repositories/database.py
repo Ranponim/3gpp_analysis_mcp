@@ -712,22 +712,29 @@ class PostgreSQLRepository(DatabaseRepository):
             # peg_name: path_key (리프 노드의 키, 즉 실제 PEG 메트릭명)
             select_parts.append("path_key AS peg_name")
             
-            # value: 스칼라 값을 숫자로 변환
+            # value: 숫자면 숫자로, 문자면 그대로 유지 (간단한 접근)
+            # - 숫자 타입이거나 숫자로 시작하는 문자열 → 숫자 변환 시도
+            # - 그 외(null, -, NA, N/D 등) → 원본 텍스트 유지
             select_parts.append(
-                "CASE WHEN jsonb_typeof(current_val) IN ('number', 'string') THEN "
-                "  CASE WHEN (clean_val ~ '^[+-]?(?:\\\d+(?:\\.\\\d+)?|\\.\\\d+)(?:[eE][+-]?\\\d+)?$' AND length(clean_val) <= 40) "
-                "    THEN clean_val::double precision "
-                "    ELSE NULL "
-                "  END "
-                "ELSE NULL END AS value"
+                "CASE "
+                "  WHEN jsonb_typeof(current_val) = 'number' THEN (current_val::text)::double precision "
+                "  WHEN jsonb_typeof(current_val) = 'string' AND current_val::text ~ '^\\s*[+-]?\\d' "
+                "    THEN (regexp_replace(current_val::text, '[^0-9\\.\\-eE]', '', 'g'))::double precision "
+                "  ELSE NULL "
+                "END AS value"
+            )
+            
+            # 원본 텍스트 값 보존 (null, -, NA, N/D 등 의미 있는 문자)
+            select_parts.append(
+                "CASE "
+                "  WHEN jsonb_typeof(current_val) IN ('number', 'string') THEN current_val::text "
+                "  ELSE NULL "
+                "END AS text_value"
             )
             
             query = (
                 f"{recursive_cte} "
                 f"SELECT {', '.join(select_parts)} FROM flattened "
-                f"CROSS JOIN LATERAL ("
-                f"  SELECT NULLIF(regexp_replace(current_val::text, '[^0-9\\.\\-eE]', '', 'g'),'') AS clean_val"
-                f") AS cv "
                 f"WHERE jsonb_typeof(current_val) <> 'object'"  # 리프 노드만 (스칼라 값)
             )
             logger.debug("fetch_peg_data(): 재귀 CTE 구성 완료 | select_parts=%s", select_parts)
@@ -747,23 +754,28 @@ class PostgreSQLRepository(DatabaseRepository):
                         continue
                     
                     family_param_key = f"csv_family_{i}"
-                    peg_list_param_keys = [f"csv_peg_{i}_{j}" for j in range(len(peg_names))]
                     
-                    peg_placeholders = ", ".join([f"%({key})s" for key in peg_list_param_keys])
+                    # 각 PEG 이름에 대해 LIKE 조건 생성
+                    # CSV: "AirMacDLThruAvg" → DB: "AirMacDLThruAvg(Kbps)" 매칭
+                    peg_like_conditions = []
+                    for j, peg_name in enumerate(peg_names):
+                        peg_param_key = f"csv_peg_{i}_{j}"
+                        # path_key가 peg_name으로 시작하는 경우 매칭 (LIKE 'AirMacDLThruAvg%')
+                        peg_like_conditions.append(f"path_key LIKE %({peg_param_key})s")
+                        params[peg_param_key] = f"{peg_name}%"  # 접두어 매칭
                     
-                    # (family_col = %s AND path_key IN (%s, %s, ...))
+                    # (family_col = %s AND (path_key LIKE %s OR path_key LIKE %s ...))
                     # family_col은 실제 DB 컬럼명 (family_id 또는 family_name)
-                    clause = f"({family_col} = %({family_param_key})s AND path_key IN ({peg_placeholders}))"
+                    peg_conditions_str = " OR ".join(peg_like_conditions)
+                    clause = f"({family_col} = %({family_param_key})s AND ({peg_conditions_str}))"
                     peg_name_filter_clauses.append(clause)
                     
-                    # 파라미터 추가
+                    # family 파라미터 추가
                     params[family_param_key] = family_id
-                    for key, name in zip(peg_list_param_keys, peg_names):
-                        params[key] = name
                 
                 if peg_name_filter_clauses:
                     additional_conditions.append(f"({' OR '.join(peg_name_filter_clauses)})")
-                    logger.info("CSV 필터 적용: %d개 family/peg 조합으로 필터링", len(peg_name_filter_clauses))
+                    logger.info("CSV 필터 적용: %d개 family/peg 조합으로 필터링 (LIKE 패턴 매칭)", len(peg_name_filter_clauses))
             # --- [로직 추가 완료] ---
             
             if filters:
