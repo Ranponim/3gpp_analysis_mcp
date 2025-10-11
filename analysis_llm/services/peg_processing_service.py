@@ -408,7 +408,36 @@ class PEGProcessingService:
                 valid_mask = (pivot_df["N-1"].notna()) & (pivot_df["N"].notna()) & (pivot_df["N-1"] != 0)
                 pivot_df["change_pct"] = None
                 if valid_mask.sum() > 0:
+                    # 변화율 계산 전 음수 값 검증
+                    negative_n1_mask = (pivot_df["N-1"] < 0)
+                    negative_n_mask = (pivot_df["N"] < 0)
+                    
+                    if negative_n1_mask.sum() > 0:
+                        logger.error("❌ N-1 기간에 음수 값이 발견되었습니다:")
+                        for peg_name, value in pivot_df.loc[negative_n1_mask, "N-1"].items():
+                            logger.error(f"   PEG: {peg_name}, N-1 값: {value}")
+                    
+                    if negative_n_mask.sum() > 0:
+                        logger.error("❌ N 기간에 음수 값이 발견되었습니다:")
+                        for peg_name, value in pivot_df.loc[negative_n_mask, "N"].items():
+                            logger.error(f"   PEG: {peg_name}, N 값: {value}")
+                    
+                    # 변화율 계산
                     pivot_df.loc[valid_mask, "change_pct"] = ((pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) / pivot_df.loc[valid_mask, "N-1"] * 100)
+                    
+                    # 변화율이 음수인 경우 상세 로깅 (큰 변화만)
+                    large_negative_changes = pivot_df[(pivot_df["change_pct"] < -20) & valid_mask]
+                    if len(large_negative_changes) > 0:
+                        logger.warning("⚠️ 큰 폭의 감소가 발견되었습니다 (변화율 < -20%):")
+                        for peg_name, row in large_negative_changes.iterrows():
+                            n_minus_1_val = row["N-1"]
+                            n_val = row["N"]
+                            change_val = row["change_pct"]
+                            logger.warning(f"   PEG: {peg_name}")
+                            logger.warning(f"      N-1 값: {n_minus_1_val:.2f}")
+                            logger.warning(f"      N 값: {n_val:.2f}")
+                            logger.warning(f"      변화율: {change_val:.2f}%")
+                            logger.warning(f"      해석: 값이 {abs(change_val):.1f}% 감소했습니다")
             else:
                 pivot_df["change_pct"] = 0
 

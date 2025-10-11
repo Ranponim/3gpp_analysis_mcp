@@ -241,13 +241,61 @@ class DataProcessor:
                     non_zero_in_map,
                     sample_items
                 )
+                
+                # 큰 폭의 음수 변화율 검출
+                large_negative_changes = {k: v for k, v in change_map.items() if v is not None and v < -20}
+                if large_negative_changes:
+                    self.logger.warning(
+                        "⚠️ change_map에서 큰 폭의 감소 감지: %d개 PEG (변화율 < -20%%)",
+                        len(large_negative_changes)
+                    )
+                    for peg_name, change_pct in large_negative_changes.items():
+                        self.logger.warning(f"   {peg_name}: {change_pct:.2f}%")
             else:
                 self.logger.warning("change_map이 비어있습니다!")
 
-            pivot_df = (
-                processed_df.pivot(index="peg_name", columns="period", values="avg_value")
-                .rename(columns={"N-1": "n_minus_1", "N": "n"})
-            )
+            # 중복 데이터 감지 및 로깅 (pivot 실패 방지)
+            self.logger.debug("pivot 실행 전 중복 데이터 검사 시작")
+            duplicates = processed_df[processed_df.duplicated(subset=['peg_name', 'period'], keep=False)]
+            
+            if not duplicates.empty:
+                unique_peg_count = duplicates['peg_name'].nunique()
+                self.logger.error("❌ 중복 데이터 발견! (pivot 실패 위험)")
+                self.logger.error("   중복 건수: %d행, %d개 PEG", len(duplicates), unique_peg_count)
+                
+                # 중복된 peg_name별로 상세 출력 (최대 5개만)
+                for idx, peg_name in enumerate(duplicates['peg_name'].unique()[:5]):
+                    dup_rows = duplicates[duplicates['peg_name'] == peg_name]
+                    self.logger.error(f"   [{idx+1}] PEG: {peg_name} (중복 {len(dup_rows)}건)")
+                    for _, row in dup_rows.iterrows():
+                        period = row.get('period', 'N/A')
+                        avg_value = row.get('avg_value', 'N/A')
+                        self.logger.error(f"       period={period}, avg_value={avg_value}")
+                
+                if unique_peg_count > 5:
+                    self.logger.error(f"   ... 외 {unique_peg_count - 5}개 PEG 더 있음")
+            else:
+                self.logger.debug("✓ 중복 데이터 없음 (pivot 안전)")
+
+            # pivot_table 사용 (중복 시에도 안전하게 처리)
+            self.logger.debug("pivot_table 실행: index=peg_name, columns=period, aggfunc=first")
+            try:
+                pivot_df = (
+                    processed_df.pivot_table(
+                        index="peg_name",
+                        columns="period",
+                        values="avg_value",
+                        aggfunc='first',  # 중복 시 첫 번째 값 사용
+                        observed=True  # 성능 최적화
+                    )
+                    .rename(columns={"N-1": "n_minus_1", "N": "n"})
+                )
+                self.logger.debug("pivot_table 완료: %d개 PEG", len(pivot_df))
+            except Exception as pivot_error:
+                self.logger.error("pivot_table 실행 중 오류 발생: %s", pivot_error)
+                self.logger.error("processed_df 정보: shape=%s, columns=%s", 
+                                 processed_df.shape, processed_df.columns.tolist())
+                raise
 
             pivot_df = pivot_df.where(pivot_df.notna(), None)
 
