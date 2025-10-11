@@ -82,18 +82,25 @@ def load_peg_definitions_from_csv(
                     logger.error("Define 수식 파싱 중 오류: '%s'. 오류: %s", define_formula, e)
             else:
                 # define 컬럼이 없는 경우 (DB 조회 대상 PEG)
-                family_id_val = row.get("family_id", "").strip()
+                # family_id 또는 family_name 컬럼 지원
+                family_val = row.get("family_id", "").strip() or row.get("family_name", "").strip()
                 peg_name = row.get("peg_name", "").strip()
 
-                # family_id와 peg_name이 모두 유효한 경우만 처리
-                if family_id_val and peg_name:
+                # family와 peg_name이 모두 유효한 경우만 처리
+                if family_val and peg_name:
                     try:
-                        family_id = int(family_id_val)
-                        db_filter[family_id].add(peg_name)
-                    except (ValueError, TypeError) as e:
+                        # 정수 변환 시도 (family_id인 경우)
+                        try:
+                            family_key = int(family_val)
+                        except (ValueError, TypeError):
+                            # 문자열 그대로 사용 (family_name인 경우)
+                            family_key = family_val
+                        
+                        db_filter[family_key].add(peg_name)
+                    except Exception as e:
                         logger.warning(
-                            "family_id 변환 실패 (무시): family_id='%s', peg_name='%s'. 오류: %s",
-                            family_id_val, peg_name, e
+                            "Family 키 처리 실패 (무시): family='%s', peg_name='%s'. 오류: %s",
+                            family_val, peg_name, e
                         )
 
         logger.info(
