@@ -644,6 +644,9 @@ class PostgreSQLRepository(DatabaseRepository):
             cte_anchor_where_clause = " AND ".join(cte_anchor_conditions)
 
             # 재귀적 JSONB 확장 (중첩된 index_name 구조 완전히 펼치기)
+            # 
+            # 🔑 핵심: index_name은 형제 노드로 존재하므로 부모 객체도 함께 전달
+            # 예시 구조: {"20": {...}, "36": {...}, "index_name": "CellIdentity"}
             recursive_cte = f"""
             WITH RECURSIVE flattened AS (
                 -- 초기: 최상위 values에서 키-값 쌍 추출
@@ -656,7 +659,13 @@ class PostgreSQLRepository(DatabaseRepository):
                     {"t." + relver_col + " AS rel_ver," if relver_col else ""}
                     kv.key AS path_key,
                     kv.value AS current_val,
-                    ARRAY[]::text[] AS dimension_names,
+                    t.{values_col} AS parent_obj,  -- 부모 객체 보존 (형제 index_name 접근용)
+                    -- 🔑 Anchor: parent_obj(전체 values)에서 index_name 추출
+                    CASE 
+                        WHEN jsonb_extract_path_text(t.{values_col}, 'index_name') IS NOT NULL
+                        THEN ARRAY[jsonb_extract_path_text(t.{values_col}, 'index_name')]
+                        ELSE ARRAY[]::text[]
+                    END AS dimension_names,
                     ARRAY[kv.key] AS dimension_values,
                     0 AS depth
                 FROM {table_name} t
@@ -675,7 +684,9 @@ class PostgreSQLRepository(DatabaseRepository):
                     {"f.rel_ver," if relver_col else ""}
                     kv.key AS path_key,
                     kv.value AS current_val,
-                    -- 현재 레벨의 index_name을 dimension_names 배열에 추가
+                    f.current_val AS parent_obj,  -- 현재 레벨을 다음 단계의 부모로 전달
+                    -- 🔑 현재 객체(current_val)에서 형제 index_name 추출
+                    -- current_val이 객체면 그 안에서 index_name을 찾음
                     CASE 
                         WHEN jsonb_typeof(f.current_val) = 'object' 
                              AND jsonb_extract_path_text(f.current_val, 'index_name') IS NOT NULL
