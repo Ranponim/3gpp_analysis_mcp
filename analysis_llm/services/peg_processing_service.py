@@ -363,6 +363,10 @@ class PEGProcessingService:
                 return pd.DataFrame(columns=["peg_name", "period", "avg_value", "change_pct"])
 
             # --- [파생 PEG 계산 로직] ---
+            # 파생 PEG 구분을 위한 플래그 추가
+            combined_df['is_derived'] = False
+            derived_peg_names = []
+            
             if derived_pegs:
                 logger.info("파생 PEG 계산 시작: %d개", len(derived_pegs))
                 # 파생 PEG 계산 시에는 dimensions를 고려하지 않음 (단순화를 위해)
@@ -388,9 +392,11 @@ class PEGProcessingService:
                     derived_df_long = eval_df[derived_peg_names].reset_index().melt(
                         id_vars=['period'], var_name='peg_name', value_name='value'
                     )
-                    # 기존 데이터와 파생 데이터 결합
+                    # 파생 PEG 표시
+                    derived_df_long['is_derived'] = True
+                    # 기존 데이터와 파생 데이터 결합 (파생 PEG가 뒤에 추가됨)
                     combined_df = pd.concat([combined_df, derived_df_long], ignore_index=True)
-                    logger.info("파생 PEG 데이터 결합 완료: %d개", len(derived_peg_names))
+                    logger.info("파생 PEG 데이터 결합 완료: %d개 (is_derived=True 플래그 추가)", len(derived_peg_names))
             # --- [계산 로직 완료] ---
 
             # 변화율 계산
@@ -421,7 +427,16 @@ class PEGProcessingService:
                 for key, value in metadata.items():
                     if value is not None: processed_df[key] = value
 
-            logger.info("PEGCalculator 처리 완료: %d행", len(processed_df))
+            # --- [파생 PEG를 DataFrame 맨 마지막으로 정렬] ---
+            # 파생 PEG 표시 컬럼 추가
+            processed_df['is_derived'] = processed_df['peg_name'].isin(derived_peg_names)
+            
+            # 정렬: 기본 PEG가 먼저, 파생 PEG가 나중에
+            # is_derived=False(기본 PEG)가 먼저 오고, is_derived=True(파생 PEG)가 나중에 옴
+            processed_df = processed_df.sort_values(by=['is_derived', 'peg_name', 'period']).reset_index(drop=True)
+            
+            logger.info("PEGCalculator 처리 완료: %d행 (파생 PEG %d개는 DataFrame 맨 마지막에 배치됨)", 
+                       len(processed_df), len(derived_peg_names))
             return processed_df
 
         except Exception as e:

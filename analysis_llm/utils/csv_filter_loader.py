@@ -41,12 +41,16 @@ def load_peg_definitions_from_csv(
 
     try:
         logger.info("CSV 파일 로드 시도: %s", file_path)
-        # define 컬럼도 문자열로 읽도록 dtype 지정
+        # 모든 컬럼을 먼저 문자열로 읽은 후 처리
         df = pd.read_csv(
             file_path,
-            dtype={'family_id': 'Int64', 'peg_name': 'str', 'define': 'str'},
+            dtype=str,  # 모든 컬럼을 문자열로 읽음
+            keep_default_na=False  # 빈 문자열을 NaN으로 변환하지 않음
         )
-        df.fillna('', inplace=True) # NaN 값을 빈 문자열로 대체
+        
+        # 빈 문자열을 NaN으로 변환 후 다시 빈 문자열로
+        df.replace('', pd.NA, inplace=True)
+        df.fillna('', inplace=True)
 
         for _, row in df.iterrows():
             define_formula = row.get("define", "").strip()
@@ -78,12 +82,19 @@ def load_peg_definitions_from_csv(
                     logger.error("Define 수식 파싱 중 오류: '%s'. 오류: %s", define_formula, e)
             else:
                 # define 컬럼이 없는 경우 (DB 조회 대상 PEG)
-                family_id_val = row.get("family_id")
+                family_id_val = row.get("family_id", "").strip()
                 peg_name = row.get("peg_name", "").strip()
 
-                if pd.notna(family_id_val) and peg_name:
-                    family_id = int(family_id_val)
-                    db_filter[family_id].add(peg_name)
+                # family_id와 peg_name이 모두 유효한 경우만 처리
+                if family_id_val and peg_name:
+                    try:
+                        family_id = int(family_id_val)
+                        db_filter[family_id].add(peg_name)
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            "family_id 변환 실패 (무시): family_id='%s', peg_name='%s'. 오류: %s",
+                            family_id_val, peg_name, e
+                        )
 
         logger.info(
             "CSV 파일 로드 완료: DB필터 %d families, 파생PEG %d개",
