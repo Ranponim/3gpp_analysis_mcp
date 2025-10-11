@@ -524,14 +524,35 @@ class AnalysisService:
                         f"PEG 처리 서비스 실패: {e.message}", workflow_step="peg_processing", details=e.to_dict()
                     ) from e
             else:
-                logger.warning("PEGProcessingService가 없어 레거시 모드 사용")
-                # 레거시 모드: 직접 처리
+                # ================================================================
+                # DEPRECATED: 레거시 모드 (PEGProcessingService 미사용)
+                # ================================================================
+                # TODO: 이 코드는 더 이상 사용되지 않습니다. 향후 제거 예정.
+                # 
+                # 제거 대상:
+                # - Line 526-549: PEGProcessingService 없이 직접 처리하는 레거시 경로
+                # - retrieve_peg_data() 직접 호출
+                # - process_peg_data() 직접 호출
+                # - 모킹 데이터 생성 로직
+                # 
+                # 현재는 모든 처리가 PEGProcessingService를 통해 이루어지므로
+                # 이 레거시 경로는 실행되지 않아야 합니다.
+                # 
+                # 제거 시점: PEGProcessingService가 필수 의존성이 된 것을 확인한 후
+                # ================================================================
+                
+                logger.warning(
+                    "⚠️ DEPRECATED: PEGProcessingService가 없어 레거시 모드 사용! "
+                    "이 경로는 더 이상 사용되지 않아야 합니다."
+                )
+                
+                # [DEPRECATED] 레거시 모드: 직접 처리
                 if self.database_repository:
                     n1_df, n_df = self.retrieve_peg_data(request, time_ranges)
                     processed_df = self.process_peg_data(n1_df, n_df, request)
                 else:
-                    # 모킹 데이터
-                    logger.warning("DatabaseRepository도 없어 모킹 데이터 사용")
+                    # [DEPRECATED] 모킹 데이터
+                    logger.warning("⚠️ DEPRECATED: DatabaseRepository도 없어 모킹 데이터 사용")
                     n1_df = pd.DataFrame(
                         {
                             "peg_name": ["preamble_count", "response_count"],
@@ -547,6 +568,10 @@ class AnalysisService:
                         }
                     )
                     processed_df = self.process_peg_data(n1_df, n_df, request)
+                
+                # ================================================================
+                # END DEPRECATED
+                # ================================================================
 
             # 4단계: LLM 분석
             logger.info("4단계: LLM 분석")

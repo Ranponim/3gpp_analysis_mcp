@@ -597,8 +597,8 @@ class PostgreSQLRepository(DatabaseRepository):
                 'bpu_id': 'BPU_ID',
             }
             logger.debug(
-                "fetch_peg_data(): JSONB 모드 | cols={time:%s,family:%s,values:%s,ne:%s,swname:%s,rel_ver:%s} | dims=%s",
-                time_col, family_col, values_col, ne_col, swname_col, relver_col, dimension_alias_map
+                "fetch_peg_data(): JSONB 모드 | cols={time:%s,family_id:%s,family_name:%s,values:%s,ne:%s,swname:%s,rel_ver:%s} | dims=%s",
+                time_col, family_id_col, family_name_col, values_col, ne_col, swname_col, relver_col, dimension_alias_map
             )
 
             # WHERE 조건 구성 (CTE Anchor용)
@@ -861,7 +861,29 @@ class PostgreSQLRepository(DatabaseRepository):
             
             return result_data
 
-        # 비-JSONB 레거시 스키마: 기존 경로 유지
+        # ========================================================================
+        # DEPRECATED: 레거시 모드 (비-JSONB 스키마)
+        # ========================================================================
+        # TODO: 이 코드는 더 이상 사용되지 않습니다. 향후 제거 예정.
+        # 
+        # 제거 대상:
+        # - Line 864-912: 레거시 스키마 처리 로직 전체
+        # - 단순 SELECT 쿼리 방식 (peg_name, value 컬럼 직접 조회)
+        # 
+        # 현재는 모든 테이블이 JSONB 스키마 (family_id, family_name, values)를 사용하므로
+        # 이 레거시 경로는 실행되지 않아야 합니다.
+        # 
+        # 제거 시점: 모든 테이블이 JSONB 스키마로 마이그레이션된 것을 확인한 후
+        # ========================================================================
+        
+        # [DEPRECATED] 비-JSONB 레거시 스키마: 기존 경로 유지
+        logger.warning(
+            "fetch_peg_data(): ⚠️ DEPRECATED 레거시 모드 실행됨! "
+            "이 경로는 더 이상 사용되지 않아야 합니다. "
+            "columns=%s, table=%s", 
+            columns, table_name
+        )
+        
         select_columns = [
             f"{columns['time']} as timestamp",
             f"{columns['peg_name']} as peg_name",
@@ -907,9 +929,13 @@ class PostgreSQLRepository(DatabaseRepository):
         if limit and limit > 0:
             query += f" LIMIT {limit}"
 
-        logger.debug("fetch_peg_data(): (레거시) SQL preview=%s", query[:5000].replace('\n',' '))
+        logger.debug("fetch_peg_data(): [DEPRECATED 레거시] SQL preview=%s", query[:5000].replace('\n',' '))
         # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
         return self.fetch_data(query, params)
+        
+        # ========================================================================
+        # END DEPRECATED
+        # ========================================================================
 
     def get_table_info(self, table_name: str) -> Dict[str, Any]:
         """
