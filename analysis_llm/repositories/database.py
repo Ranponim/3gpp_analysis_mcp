@@ -751,8 +751,9 @@ class PostgreSQLRepository(DatabaseRepository):
                     
                     peg_placeholders = ", ".join([f"%({key})s" for key in peg_list_param_keys])
                     
-                    # (family_name = %s AND path_key IN (%s, %s, ...))
-                    clause = f"(family_name = %({family_param_key})s AND path_key IN ({peg_placeholders}))"
+                    # (family_col = %s AND path_key IN (%s, %s, ...))
+                    # family_col은 실제 DB 컬럼명 (family_id 또는 family_name)
+                    clause = f"({family_col} = %({family_param_key})s AND path_key IN ({peg_placeholders}))"
                     peg_name_filter_clauses.append(clause)
                     
                     # 파라미터 추가
