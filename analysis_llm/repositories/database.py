@@ -584,7 +584,8 @@ class PostgreSQLRepository(DatabaseRepository):
             
             time_col = columns.get('time', 'datetime')
             values_col = columns.get('values', 'values')
-            family_col = columns.get('family_name', 'family_id')
+            # family_id (정수 타입)를 우선 사용, 없으면 family_name (문자열 타입) 사용
+            family_col = columns.get('family_id') or columns.get('family_name') or 'family_id'
             ne_col = columns.get('ne') or columns.get('ne_key') or 'ne_key'
             swname_col = columns.get('swname', 'swname')
             relver_col = columns.get('rel_ver', 'rel_ver')

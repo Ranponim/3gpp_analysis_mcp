@@ -323,9 +323,11 @@ class AnalysisService:
             request.get("db", {})
             table = request.get("table", _DEFAULT_TABLE)
             # columns는 MCP handler에서 원본 보존됨. 없을 때만 기본값 적용
+            # family_id와 family_name 둘 다 매핑 (하위 호환성 및 명확성)
             columns = request.get("columns") or {
                 "time": "datetime",
-                "family_name": "family_id",
+                "family_id": "family_id",      # DB 실제 컬럼명 (정수 타입) - 우선순위
+                "family_name": "family_id",    # 하위 호환성 (레거시 API 지원)
                 "values": "values",
                 "ne": "ne_key",
                 "rel_ver": "rel_ver",

@@ -169,9 +169,11 @@ class PEGProcessingService:
             table_name = table_config.get("table", _DEFAULT_TABLE)
             # 새 스키마 기본 매핑 (datetime, family_id, ne_key, rel_ver, swname, values, version)
             # 상위에서 보존된 columns를 우선 사용, 없으면 JSONB 기본 매핑 적용
+            # family_id와 family_name 둘 다 매핑 (하위 호환성 및 명확성)
             columns = table_config.get("columns") or {
                 "time": "datetime",
-                "family_name": "family_id",
+                "family_id": "family_id",      # DB 실제 컬럼명 (정수 타입) - 우선순위
+                "family_name": "family_id",    # 하위 호환성 (레거시 API 지원)
                 "values": "values",
                 "ne": "ne_key",
                 "rel_ver": "rel_ver",
