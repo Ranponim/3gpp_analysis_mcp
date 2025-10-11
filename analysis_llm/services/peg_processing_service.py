@@ -167,13 +167,12 @@ class PEGProcessingService:
             n1_start, n1_end, n_start, n_end = time_ranges
 
             table_name = table_config.get("table", _DEFAULT_TABLE)
-            # 새 스키마 기본 매핑 (datetime, family_id, ne_key, rel_ver, swname, values, version)
+            # 새 스키마 기본 매핑 (datetime, family_id, family_name, ne_key, rel_ver, swname, values, version)
             # 상위에서 보존된 columns를 우선 사용, 없으면 JSONB 기본 매핑 적용
-            # family_id와 family_name 둘 다 매핑 (하위 호환성 및 명확성)
             columns = table_config.get("columns") or {
                 "time": "datetime",
-                "family_id": "family_id",      # DB 실제 컬럼명 (정수 타입) - 우선순위
-                "family_name": "family_id",    # 하위 호환성 (레거시 API 지원)
+                "family_id": "family_id",      # DB 컬럼 (int, CSV의 family_id와 매칭)
+                "family_name": "family_name",  # DB 컬럼 (char, family 이름)
                 "values": "values",
                 "ne": "ne_key",
                 "rel_ver": "rel_ver",

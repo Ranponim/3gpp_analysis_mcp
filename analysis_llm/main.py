@@ -52,7 +52,8 @@ Clean Architecture 패턴을 적용하여 Repository, Service, Presentation 계�
   "table": "kpi_summary",
   "columns": {
     "time": "datetime",
-    "family_name": "family_id",
+    "family_id": "family_id",
+    "family_name": "family_name",
     "values": "values",
     "ne": "ne_key",
     "rel_ver": "rel_ver",

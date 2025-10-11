@@ -34,6 +34,7 @@ def load_peg_definitions_from_csv(
     Returns:
         Tuple[Dict[int, Set[str]], List[Dict[str, Any]]]:
         1. DB 필터용 딕셔너리: {family_id: {peg_name_1, peg_name_2, ...}}
+           (family_id는 정수로 유지되어 DB의 int 컬럼과 매칭됨)
         2. 파생 PEG 정의 리스트: [{'output_peg': str, 'formula': str, 'dependencies': Set[str]}, ...]
     """
     db_filter: Dict[int, Set[str]] = defaultdict(set)
@@ -82,24 +83,21 @@ def load_peg_definitions_from_csv(
                     logger.error("Define 수식 파싱 중 오류: '%s'. 오류: %s", define_formula, e)
             else:
                 # define 컬럼이 없는 경우 (DB 조회 대상 PEG)
-                # family_id 또는 family_name 컬럼 지원
-                family_val = row.get("family_id", "").strip() or row.get("family_name", "").strip()
+                # family_id 컬럼만 지원 (DB의 family_id int 컬럼과 매칭)
+                family_val = row.get("family_id", "").strip()
                 peg_name = row.get("peg_name", "").strip()
 
-                # family와 peg_name이 모두 유효한 경우만 처리
+                # family_id와 peg_name이 모두 유효한 경우만 처리
                 if family_val and peg_name:
                     try:
-                        # 정수 변환 시도 (family_id인 경우)
-                        try:
-                            family_key = int(family_val)
-                        except (ValueError, TypeError):
-                            # 문자열 그대로 사용 (family_name인 경우)
-                            family_key = family_val
-                        
+                        # family_id를 정수로 변환 (DB의 int 컬럼과 매칭)
+                        # CSV에 5002라고 적혀있으면 → 5002 (정수)로 변환
+                        family_key = int(family_val)
                         db_filter[family_key].add(peg_name)
-                    except Exception as e:
+                        logger.debug("CSV 필터 추가: family_id=%d, peg_name='%s'", family_key, peg_name)
+                    except (ValueError, TypeError) as e:
                         logger.warning(
-                            "Family 키 처리 실패 (무시): family='%s', peg_name='%s'. 오류: %s",
+                            "Family ID를 정수로 변환 실패 (무시): family_id='%s', peg_name='%s'. 오류: %s",
                             family_val, peg_name, e
                         )
 

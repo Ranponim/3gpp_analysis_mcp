@@ -558,12 +558,11 @@ class PostgreSQLRepository(DatabaseRepository):
         except Exception:
             logger.debug("fetch_peg_data(): columns 로깅 실패 (비정형 입력)")
 
-        # JSONB 기반 스키마 여부 판별 (values/family_name 존재 시)
+        # JSONB 기반 스키마 여부 판별 (values 존재 시)
         json_mode = (
             ('values' in (columns or {}))
-            or ('family_name' in (columns or {}))
             or ('values' in list((columns or {}).values()))
-            or ('family_name' in list((columns or {}).values()))
+            or ('family_id' in (columns or {}))
         )
         logger.debug("fetch_peg_data(): JSONB 감지 결과 | json_mode=%s", json_mode)
 
@@ -584,8 +583,10 @@ class PostgreSQLRepository(DatabaseRepository):
             
             time_col = columns.get('time', 'datetime')
             values_col = columns.get('values', 'values')
-            # family_id (정수 타입)를 우선 사용, 없으면 family_name (문자열 타입) 사용
-            family_col = columns.get('family_id') or columns.get('family_name') or 'family_id'
+            # DB 컬럼: family_id (int), family_name (char)
+            # CSV에서 로드된 family_id는 정수로 유지됨
+            family_id_col = columns.get('family_id', 'family_id')
+            family_name_col = columns.get('family_name', 'family_name')
             ne_col = columns.get('ne') or columns.get('ne_key') or 'ne_key'
             swname_col = columns.get('swname', 'swname')
             relver_col = columns.get('rel_ver', 'rel_ver')
@@ -603,18 +604,19 @@ class PostgreSQLRepository(DatabaseRepository):
             # WHERE 조건 구성 (CTE Anchor용)
             cte_anchor_conditions = [f"t.{time_col} BETWEEN %(start_time)s AND %(end_time)s"]
 
-            # --- [CSV 필터 로직 추가] ---
-            # 1. family_id 필터링
+            # --- [CSV 필터 로직] ---
+            # 1. family_id 필터링 (CSV의 family_id는 정수로 유지됨)
             if peg_filter:
                 family_ids_to_filter = list(peg_filter.keys())
                 if family_ids_to_filter:
-                    # family_col은 family_id를 가리키는 실제 DB 컬럼명
+                    # family_id_col은 DB의 family_id 컬럼 (int)
+                    # peg_filter의 키는 CSV에서 로드한 family_id 정수 (예: 5002)
                     placeholders = ",".join([f"%(family_filter_{i})s" for i, _ in enumerate(family_ids_to_filter)])
-                    cte_anchor_conditions.append(f"t.{family_col} IN ({placeholders})")
+                    cte_anchor_conditions.append(f"t.{family_id_col} IN ({placeholders})")
                     for i, v in enumerate(family_ids_to_filter):
-                        params[f"family_filter_{i}"] = v
-                    logger.info("CSV 필터 적용: %d개 family_id로 필터링", len(family_ids_to_filter))
-            # --- [로직 추가 완료] ---
+                        params[f"family_filter_{i}"] = int(v)  # 명시적 정수 변환
+                    logger.info("CSV 필터 적용: %d개 family_id로 필터링 (값: %s)", len(family_ids_to_filter), family_ids_to_filter[:5])
+            # --- [로직 완료] ---
             params['start_time'] = start_time
             params['end_time'] = end_time
 
@@ -647,7 +649,8 @@ class PostgreSQLRepository(DatabaseRepository):
                 -- 초기: 최상위 values에서 키-값 쌍 추출
                 SELECT 
                     t.{time_col} AS timestamp,
-                    t.{family_col} AS family_name,
+                    t.{family_id_col} AS family_id,
+                    t.{family_name_col} AS family_name,
                     {"t." + ne_col + " AS ne," if ne_col else ""}
                     {"t." + swname_col + " AS swname," if swname_col else ""}
                     {"t." + relver_col + " AS rel_ver," if relver_col else ""}
@@ -665,6 +668,7 @@ class PostgreSQLRepository(DatabaseRepository):
                 -- 재귀: 객체면 한 단계 더 펼치기 + index_name 누적
                 SELECT 
                     f.timestamp,
+                    f.family_id,
                     f.family_name,
                     {"f.ne," if ne_col else ""}
                     {"f.swname," if swname_col else ""}
@@ -695,6 +699,7 @@ class PostgreSQLRepository(DatabaseRepository):
             # dimension_names와 dimension_values를 조합하여 차원 정보 구성
             select_parts: List[str] = [
                 "timestamp",
+                "family_id",
                 "family_name",
             ]
             if ne_col:
@@ -745,8 +750,8 @@ class PostgreSQLRepository(DatabaseRepository):
             # 추가 필터 (재귀 CTE 후 적용)
             additional_conditions: List[str] = []
 
-            # --- [CSV 필터 로직 추가] ---
-            # 2. peg_name 필터링
+            # --- [CSV 필터 로직] ---
+            # 2. peg_name 필터링 (family_id는 이미 CTE anchor에서 필터링됨)
             if peg_filter:
                 peg_name_filter_clauses = []
                 # 각 family_id와 peg_name 목록에 대해 OR 조건 생성
@@ -765,19 +770,20 @@ class PostgreSQLRepository(DatabaseRepository):
                         peg_like_conditions.append(f"path_key LIKE %({peg_param_key})s")
                         params[peg_param_key] = f"{peg_name}%"  # 접두어 매칭
                     
-                    # (family_col = %s AND (path_key LIKE %s OR path_key LIKE %s ...))
-                    # family_col은 실제 DB 컬럼명 (family_id 또는 family_name)
+                    # (family_id = %s AND (path_key LIKE %s OR path_key LIKE %s ...))
+                    # family_id는 DB의 family_id 컬럼 (int)
+                    # family_id는 CSV에서 로드한 정수 (예: 5002)
                     peg_conditions_str = " OR ".join(peg_like_conditions)
-                    clause = f"({family_col} = %({family_param_key})s AND ({peg_conditions_str}))"
+                    clause = f"(family_id = %({family_param_key})s AND ({peg_conditions_str}))"
                     peg_name_filter_clauses.append(clause)
                     
-                    # family 파라미터 추가
-                    params[family_param_key] = family_id
+                    # family_id 파라미터 추가 (정수로 명시적 변환)
+                    params[family_param_key] = int(family_id)
                 
                 if peg_name_filter_clauses:
                     additional_conditions.append(f"({' OR '.join(peg_name_filter_clauses)})")
-                    logger.info("CSV 필터 적용: %d개 family/peg 조합으로 필터링 (LIKE 패턴 매칭)", len(peg_name_filter_clauses))
-            # --- [로직 추가 완료] ---
+                    logger.info("CSV 필터 적용: %d개 family_id/peg 조합으로 필터링 (LIKE 패턴 매칭)", len(peg_name_filter_clauses))
+            # --- [로직 완료] ---
             
             if filters:
                 for key, value in filters.items():
