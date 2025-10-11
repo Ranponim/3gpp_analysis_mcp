@@ -437,6 +437,7 @@ class PEGProcessingService:
         table_config: Dict[str, Any],
         filters: Dict[str, Any],
         peg_config: Optional[Dict[str, Any]] = None,
+        request_context: Optional[Dict[str, Any]] = None,
     ) -> pd.DataFrame:
         """
         전체 PEG 데이터 처리 워크플로우 실행
@@ -446,6 +447,7 @@ class PEGProcessingService:
             table_config (Dict[str, Any]): 테이블/컬럼 설정
             filters (Dict[str, Any]): 필터 조건
             peg_config (Optional[Dict[str, Any]]): PEG 설정
+            request_context (Optional[Dict[str, Any]]): API 요청 컨텍스트 (CSV 경로 재정의용)
 
         Returns:
             pd.DataFrame: 처리된 PEG 데이터
@@ -459,69 +461,17 @@ class PEGProcessingService:
         settings = get_settings()
         db_filter = {}
         derived_pegs = []
-        
         if settings.peg_filter_enabled:
-            logger.info("=" * 60)
-            logger.info("CSV 필터링 기능: 활성화됨 (PEG_FILTER_ENABLED=true)")
-            logger.info("=" * 60)
-            
-            # CSV 파일 경로 구성
-            filter_dir = settings.peg_filter_dir_path
-            filename_to_use = settings.peg_filter_default_file
-            full_csv_path = os.path.join(filter_dir, filename_to_use)
-            
-            # 상세 로그 출력
-            logger.info("CSV 필터 설정:")
-            logger.info("  - 디렉토리: %s", filter_dir)
-            logger.info("  - 파일명: %s", filename_to_use)
-            logger.info("  - 전체 경로: %s", full_csv_path)
-            
-            # 파일 존재 여부 확인
-            file_exists = os.path.exists(full_csv_path)
-            logger.info("  - 파일 존재 여부: %s", "✓ 존재함" if file_exists else "✗ 없음")
-            
-            # 디렉토리 내 파일 목록 조회
-            if os.path.exists(filter_dir) and os.path.isdir(filter_dir):
-                try:
-                    files_in_dir = [f for f in os.listdir(filter_dir) if f.endswith('.csv')]
-                    logger.info("  - 디렉토리 내 CSV 파일들: %s", files_in_dir if files_in_dir else "(없음)")
-                except Exception as e:
-                    logger.warning("  - 디렉토리 조회 실패: %s", e)
-            else:
-                logger.warning("  - 디렉토리가 존재하지 않음: %s", filter_dir)
-            
-            # 절대 경로도 확인 (디버깅용)
-            try:
-                abs_path = os.path.abspath(full_csv_path)
-                abs_dir = os.path.abspath(filter_dir)
-                logger.debug("  - 절대 경로 (파일): %s", abs_path)
-                logger.debug("  - 절대 경로 (디렉토리): %s", abs_dir)
-                logger.debug("  - 현재 작업 디렉토리: %s", os.getcwd())
-            except Exception as e:
-                logger.debug("  - 절대 경로 변환 실패: %s", e)
-            
-            logger.info("-" * 60)
+            request_context = request_context or {}
+            filter_file_override = request_context.get("peg_filter_file")
+            filename_to_use = filter_file_override if filter_file_override else settings.peg_filter_default_file
+            full_csv_path = os.path.join(settings.peg_filter_dir_path, filename_to_use)
             
             # 확장된 로더 호출
-            if file_exists:
-                db_filter, derived_pegs = load_peg_definitions_from_csv(full_csv_path)
-                logger.info("✓ CSV 로드 성공: DB필터 %d families, 파생PEG %d개", len(db_filter), len(derived_pegs))
-                if db_filter:
-                    logger.info("  - 필터링할 family_id: %s", list(db_filter.keys()))
-                if derived_pegs:
-                    logger.info("  - 파생 PEG 목록: %s", [p['output_peg'] for p in derived_pegs])
-            else:
-                logger.error("✗ CSV 파일을 찾을 수 없습니다: %s", full_csv_path)
-                logger.error("  해결 방법:")
-                logger.error("  1. 파일명이 정확한지 확인: %s", filename_to_use)
-                logger.error("  2. 파일이 올바른 위치에 있는지 확인: %s", filter_dir)
-                logger.error("  3. 상대 경로가 올바른지 확인 (현재 작업 디렉토리 기준)")
-            
-            logger.info("=" * 60)
+            db_filter, derived_pegs = load_peg_definitions_from_csv(full_csv_path)
+            logger.info("CSV 로드: DB필터 %d families, 파생PEG %d개", len(db_filter), len(derived_pegs))
         else:
-            logger.info("CSV 필터링 기능: 비활성화됨 (PEG_FILTER_ENABLED=false)")
-            logger.info("  - 모든 PEG 데이터를 조회합니다 (필터링 없음)")
-            logger.info("  - 활성화하려면 환경변수 설정: PEG_FILTER_ENABLED=true")
+            logger.debug("CSV 필터링 기능이 비활성화되어 있습니다.")
         # --- [수정 완료] ---
 
         try:
