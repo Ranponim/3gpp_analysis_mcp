@@ -179,7 +179,6 @@ class AnalysisService:
         summary = (
             llm_result.get("summary")
             or llm_result.get("executive_summary")
-            or llm_result.get("overall_summary")
         )
 
         return {

@@ -240,7 +240,7 @@ class RequestValidator:
         # analysis_type 검증
         if "analysis_type" in request:
             analysis_type = request["analysis_type"]
-            valid_types = ["overall", "enhanced", "specific"]
+            valid_types = ["enhanced"]  # "specific" 주석처리: 사용되지 않음
             if analysis_type not in valid_types:
                 raise RequestValidationError(
                     f"analysis_type은 {valid_types} 중 하나여야 합니다",

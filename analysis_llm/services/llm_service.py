@@ -121,77 +121,6 @@ class BasePromptStrategy(ABC):
         return formatted
 
 
-class OverallAnalysisPromptStrategy(BasePromptStrategy):
-    """
-    전체 PEG 통합 분석 프롬프트 전략
-    (기존 main.py의 create_llm_analysis_prompt_overall 로직)
-    """
-
-    def get_strategy_name(self) -> str:
-        return "overall_analysis"
-
-    def build_prompt(self, processed_df: pd.DataFrame, n1_range: str, n_range: str, **kwargs) -> str:
-        """전체 PEG 통합 분석 프롬프트 생성"""
-        logger.info("OverallAnalysisPromptStrategy.build_prompt() 호출")
-
-        if not self.validate_input_data(processed_df):
-            raise LLMAnalysisError("입력 데이터가 유효하지 않습니다", analysis_type=self.get_strategy_name())
-
-        # 데이터 포맷팅
-        preview_cols = [c for c in processed_df.columns if c in ("peg_name", "avg_value", "period")]
-        if not preview_cols:
-            preview_cols = list(processed_df.columns)[:5]
-
-        # 환경변수에서 미리보기 행 수 설정 (기본값: 200행)
-        preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
-        preview_df = processed_df[preview_cols].head(preview_rows)
-        data_preview = self.format_dataframe_for_prompt(preview_df)
-
-        # 프롬프트 구성
-        prompt = f"""
-3GPP Cell 성능 분석 요청
-
-**분석 기간:**
-- N-1 기간: {n1_range}
-- N 기간: {n_range}
-
-**PEG 데이터 개요:**
-{data_preview}
-
-**분석 요구사항:**
-위 PEG 데이터를 바탕으로 다음 형식의 JSON 응답을 생성해주세요:
-
-{{
-  "summary": "전체적인 성능 요약",
-  "key_findings": [
-    "주요 발견사항 1",
-    "주요 발견사항 2"
-  ],
-  "recommendations": [
-    "권고사항 1",
-    "권고사항 2"
-  ],
-  "technical_analysis": {{
-    "overall_status": "GOOD/WARNING/CRITICAL",
-    "critical_issues": [],
-    "performance_trends": "성능 트렌드 분석"
-  }},
-  "cells_with_significant_change": {{
-    "CELL_ID": "변화 설명"
-  }}
-}}
-
-**분석 지침:**
-1. N-1과 N 기간 간의 성능 변화를 중점 분석
-2. 임계값을 벗어나는 PEG가 있는지 확인
-3. Cell별 성능 차이와 패턴 분석
-4. 실용적인 개선 권고사항 제시
-"""
-
-        logger.info("전체 분석 프롬프트 생성 완료: %d자", len(prompt))
-        return prompt
-
-
 class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
     """
     고도화된 종합 분석 프롬프트 전략
@@ -221,7 +150,7 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         try:
             from analysis_llm.config.prompt_loader import PromptLoader
             prompt_loader = PromptLoader()
-            prompt_template = prompt_loader.get_prompt("enhanced")
+            prompt_template = prompt_loader.get_prompt_template("enhanced")
             
             # 변수 치환
             prompt = prompt_template.format(
@@ -319,91 +248,91 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
             return prompt
 
 
-class SpecificPEGsAnalysisPromptStrategy(BasePromptStrategy):
-    """
-    특정 PEG 전용 분석 프롬프트 전략
-    (기존 main.py의 create_llm_analysis_prompt_specific_pegs 로직)
-    """
+# class SpecificPEGsAnalysisPromptStrategy(BasePromptStrategy):
+#     """
+#     특정 PEG 전용 분석 프롬프트 전략
+#     (기존 main.py의 create_llm_analysis_prompt_specific_pegs 로직)
+#     """
 
-    def get_strategy_name(self) -> str:
-        return "specific_pegs_analysis"
+#     def get_strategy_name(self) -> str:
+#         return "specific_pegs_analysis"
 
-    def build_prompt(
-        self,
-        processed_df: pd.DataFrame,
-        n1_range: str,
-        n_range: str,
-        **kwargs,
-    ) -> str:
-        """특정 PEG 전용 분석 프롬프트 생성"""
-        logger.info("SpecificPEGsAnalysisPromptStrategy.build_prompt() 호출")
+#     def build_prompt(
+#         self,
+#         processed_df: pd.DataFrame,
+#         n1_range: str,
+#         n_range: str,
+#         **kwargs,
+#     ) -> str:
+#         """특정 PEG 전용 분석 프롬프트 생성"""
+#         logger.info("SpecificPEGsAnalysisPromptStrategy.build_prompt() 호출")
 
-        if not self.validate_input_data(processed_df):
-            raise LLMAnalysisError("입력 데이터가 유효하지 않습니다", analysis_type=self.get_strategy_name())
+#         if not self.validate_input_data(processed_df):
+#             raise LLMAnalysisError("입력 데이터가 유효하지 않습니다", analysis_type=self.get_strategy_name())
 
-        if processed_df.empty:
-            raise LLMAnalysisError(
-                f"분석할 PEG 데이터가 없습니다.",
-                analysis_type=self.get_strategy_name(),
-            )
+#         if processed_df.empty:
+#             raise LLMAnalysisError(
+#                 f"분석할 PEG 데이터가 없습니다.",
+#                 analysis_type=self.get_strategy_name(),
+#             )
 
-        # 데이터 포맷팅
-        preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
-        preview_df = processed_df.head(preview_rows)
-        data_preview = self.format_dataframe_for_prompt(preview_df)
+#         # 데이터 포맷팅
+#         preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
+#         preview_df = processed_df.head(preview_rows)
+#         data_preview = self.format_dataframe_for_prompt(preview_df)
 
-        # 선택된 PEG 목록 (DataFrame에서 직접 추출)
-        pegs_list = ", ".join(processed_df["peg_name"].unique())
+#         # 선택된 PEG 목록 (DataFrame에서 직접 추출)
+#         pegs_list = ", ".join(processed_df["peg_name"].unique())
 
-        # 프롬프트 구성
-        prompt = f"""
-3GPP Cell 성능 특정 PEG 집중 분석
+#         # 프롬프트 구성
+#         prompt = f"""
+# 3GPP Cell 성능 특정 PEG 집중 분석
 
-**분석 대상 PEG:** {pegs_list}
+# **분석 대상 PEG:** {pegs_list}
 
-**분석 기간:**
-- N-1 기간: {n1_range}
-- N 기간: {n_range}
+# **분석 기간:**
+# - N-1 기간: {n1_range}
+# - N 기간: {n_range}
 
-**선택된 PEG 데이터:**
-{data_preview}
+# **선택된 PEG 데이터:**
+# {data_preview}
 
-**집중 분석 요구사항:**
-선택된 PEG들에 대해 다음 형식의 JSON 응답을 생성해주세요:
+# **집중 분석 요구사항:**
+# 선택된 PEG들에 대해 다음 형식의 JSON 응답을 생성해주세요:
 
-{{
-  "summary": "선택된 PEG들의 성능 요약",
-  "peg_analysis": {{
-    "PEG_NAME": {{
-      "status": "GOOD/WARNING/CRITICAL",
-      "n1_value": "N-1 기간 값",
-      "n_value": "N 기간 값",
-      "change_analysis": "변화 분석",
-      "recommendations": ["PEG별 권고사항"]
-    }}
-  }},
-  "cross_peg_insights": [
-    "PEG간 상관관계 및 패턴 분석"
-  ],
-  "focused_recommendations": [
-    "선택된 PEG들에 특화된 권고사항"
-  ],
-  "technical_details": {{
-    "measurement_quality": "측정 품질 평가",
-    "data_completeness": "데이터 완성도",
-    "analysis_confidence": "분석 신뢰도"
-  }}
-}}
+# {{
+#   "summary": "선택된 PEG들의 성능 요약",
+#   "peg_analysis": {{
+#     "PEG_NAME": {{
+#       "status": "GOOD/WARNING/CRITICAL",
+#       "n1_value": "N-1 기간 값",
+#       "n_value": "N 기간 값",
+#       "change_analysis": "변화 분석",
+#       "recommendations": ["PEG별 권고사항"]
+#     }}
+#   }},
+#   "cross_peg_insights": [
+#     "PEG간 상관관계 및 패턴 분석"
+#   ],
+#   "focused_recommendations": [
+#     "선택된 PEG들에 특화된 권고사항"
+#   ],
+#   "technical_details": {{
+#     "measurement_quality": "측정 품질 평가",
+#     "data_completeness": "데이터 완성도",
+#     "analysis_confidence": "분석 신뢰도"
+#   }}
+# }}
 
-**분석 지침:**
-1. 선택된 PEG들에만 집중하여 심층 분석
-2. PEG간 상호작용 및 의존성 분석
-3. 각 PEG별 개별 성능 평가
-4. 특화된 최적화 방안 제시
-"""
+# **분석 지침:**
+# 1. 선택된 PEG들에만 집중하여 심층 분석
+# 2. PEG간 상호작용 및 의존성 분석
+# 3. 각 PEG별 개별 성능 평가
+# 4. 특화된 최적화 방안 제시
+# """
 
-        logger.info("특정 PEG 분석 프롬프트 생성 완료: %d자 (PEG: %d개)", len(prompt), len(processed_df["peg_name"].unique()))
-        return prompt
+#         logger.info("특정 PEG 분석 프롬프트 생성 완료: %d자 (PEG: %d개)", len(prompt), len(processed_df["peg_name"].unique()))
+#         return prompt
 
 
 class LLMAnalysisService:
@@ -432,9 +361,8 @@ class LLMAnalysisService:
 
         # 프롬프트 전략들 초기화
         self.prompt_strategies = {
-            "overall": OverallAnalysisPromptStrategy(),
             "enhanced": EnhancedAnalysisPromptStrategy(),
-            "specific": SpecificPEGsAnalysisPromptStrategy(),
+            # "specific": SpecificPEGsAnalysisPromptStrategy(),  # 주석처리: 사용되지 않음
         }
 
         logger.info(
@@ -463,7 +391,7 @@ class LLMAnalysisService:
             processed_df (pd.DataFrame): 처리된 PEG 데이터
             n1_range (str): N-1 기간 문자열
             n_range (str): N 기간 문자열
-            analysis_type (str): 분석 유형 ('overall', 'enhanced', 'specific')
+            analysis_type (str): 분석 유형 ('enhanced')  # 'specific' 주석처리: 사용되지 않음
             enable_mock (bool): 모킹 모드 활성화
             **kwargs: 추가 매개변수
 

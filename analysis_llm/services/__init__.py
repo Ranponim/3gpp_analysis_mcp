@@ -10,8 +10,7 @@ from .llm_service import (
     EnhancedAnalysisPromptStrategy,
     LLMAnalysisError,
     LLMAnalysisService,
-    OverallAnalysisPromptStrategy,
-    SpecificPEGsAnalysisPromptStrategy,
+    # SpecificPEGsAnalysisPromptStrategy,  # 주석처리: 사용되지 않음
 )
 from .peg_processing_service import PEGProcessingError, PEGProcessingService
 from .peg_service import PEGCalculationError, PEGCalculator
@@ -23,9 +22,8 @@ __all__ = [
     "LLMAnalysisService",
     "LLMAnalysisError",
     "BasePromptStrategy",
-    "OverallAnalysisPromptStrategy",
     "EnhancedAnalysisPromptStrategy",
-    "SpecificPEGsAnalysisPromptStrategy",
+    # "SpecificPEGsAnalysisPromptStrategy",  # 주석처리: 사용되지 않음
     "AnalysisService",
     "AnalysisServiceError",
     "PEGProcessingService",
