@@ -66,17 +66,19 @@ class BackendPayloadBuilder:
             "All hosts"
         )
         
-        # rel_ver: filters만 사용 (DB에 저장되지 않음)
-        rel_ver = BackendPayloadBuilder._extract_identifier(
-            filters.get("rel_ver"),
-            default=None
+        # rel_ver: DB > filters > None (기본값)
+        rel_ver = (
+            db_identifiers.get("rel_ver") or
+            BackendPayloadBuilder._extract_identifier(filters.get("rel_ver")) or
+            None
         )
         
         logger.debug(
             "식별자 우선순위 적용 결과:\n"
             "  ne_id: %s (DB=%s, filters=%s)\n"
             "  cell_id: %s (DB=%s, filters=%s)\n"
-            "  swname: %s (DB=%s, filters=%s)",
+            "  swname: %s (DB=%s, filters=%s)\n"
+            "  rel_ver: %s (DB=%s, filters=%s)",
             ne_id,
             db_identifiers.get("ne_id"),
             BackendPayloadBuilder._extract_identifier(filters.get("ne")),
@@ -85,7 +87,10 @@ class BackendPayloadBuilder:
             BackendPayloadBuilder._extract_identifier(filters.get("cellid")),
             swname,
             db_identifiers.get("swname"),
-            BackendPayloadBuilder._extract_identifier(filters.get("swname"))
+            BackendPayloadBuilder._extract_identifier(filters.get("swname")),
+            rel_ver,
+            db_identifiers.get("rel_ver"),
+            BackendPayloadBuilder._extract_identifier(filters.get("rel_ver"))
         )
         
         # 분석 기간 파싱
@@ -313,6 +318,33 @@ class BackendPayloadBuilder:
         """
         llm_data = analysis_result.get("llm_analysis", {})
         
+        # 디버그 로깅: 원본 LLM 데이터 구조 확인
+        logger.debug(
+            "LLM 분석 원본 데이터 구조:\n"
+            "  전체 키: %s\n"
+            "  summary: %s\n"
+            "  key_findings: %s\n"
+            "  recommendations: %s\n"
+            "  issues: %s\n"
+            "  critical_issues: %s\n"
+            "  technical_analysis: %s\n"
+            "  cells_with_significant_change: %s\n"
+            "  action_plan: %s\n"
+            "  model_name: %s\n"
+            "  model_used: %s",
+            list(llm_data.keys()) if isinstance(llm_data, dict) else type(llm_data).__name__,
+            llm_data.get("summary", "없음"),
+            llm_data.get("key_findings", "없음"),
+            llm_data.get("recommendations", "없음"),
+            llm_data.get("issues", "없음"),
+            llm_data.get("critical_issues", "없음"),
+            llm_data.get("technical_analysis", "없음"),
+            llm_data.get("cells_with_significant_change", "없음"),
+            llm_data.get("action_plan", "없음"),
+            llm_data.get("model_name", "없음"),
+            llm_data.get("model_used", "없음")
+        )
+        
         # recommendations 키 매핑 (여러 가능한 키 이름 지원)
         recommendations = (
             llm_data.get("recommendations") or
@@ -321,16 +353,79 @@ class BackendPayloadBuilder:
             []
         )
         
-        # issues도 None일 수 있으므로 안전하게 처리
-        issues = llm_data.get("issues") or []
+        # issues 키 매핑 (여러 가능한 키 이름 지원)
+        issues = (
+            llm_data.get("issues") or
+            llm_data.get("critical_issues") or
+            llm_data.get("technical_analysis", {}).get("critical_issues") or
+            []
+        )
         
-        return {
+        # confidence 키 매핑 (여러 가능한 키 이름 지원)
+        confidence = (
+            llm_data.get("confidence") or
+            llm_data.get("analysis_confidence") or
+            llm_data.get("technical_analysis", {}).get("confidence") or
+            llm_data.get("technical_analysis", {}).get("confidence_level")
+        )
+        
+        # model_name 키 매핑 (여러 가능한 키 이름 지원)
+        model_name = (
+            llm_data.get("model_name") or
+            llm_data.get("model") or
+            llm_data.get("model_used") or
+            llm_data.get("_analysis_metadata", {}).get("strategy_used")
+        )
+        
+        # technical_analysis 전체 구조 추출
+        technical_analysis = llm_data.get("technical_analysis", {})
+        
+        # cells_with_significant_change 추출
+        cells_with_significant_change = llm_data.get("cells_with_significant_change", {})
+        
+        # action_plan 추출 (우선순위별 액션 플랜)
+        action_plan = llm_data.get("action_plan", [])
+        
+        # key_findings 추출 (핵심 발견사항)
+        key_findings = llm_data.get("key_findings", [])
+        
+        result = {
             "summary": llm_data.get("summary"),
             "issues": issues,
             "recommendations": recommendations,
-            "confidence": llm_data.get("confidence"),
-            "model_name": llm_data.get("model")
+            "confidence": confidence,
+            "model_name": model_name,
+            # Enhanced 프롬프트의 추가 필드들
+            "technical_analysis": technical_analysis,
+            "cells_with_significant_change": cells_with_significant_change,
+            "action_plan": action_plan,
+            "key_findings": key_findings
         }
+        
+        # 디버그 로깅: 추출된 결과 확인
+        logger.debug(
+            "LLM 분석 추출 결과:\n"
+            "  summary: %s\n"
+            "  issues: %d개\n"
+            "  recommendations: %d개\n"
+            "  confidence: %s\n"
+            "  model_name: %s\n"
+            "  technical_analysis: %s\n"
+            "  cells_with_significant_change: %d개\n"
+            "  action_plan: %d개\n"
+            "  key_findings: %d개",
+            "있음" if result["summary"] else "없음",
+            len(result["issues"]) if isinstance(result["issues"], list) else 0,
+            len(result["recommendations"]) if isinstance(result["recommendations"], list) else 0,
+            result["confidence"],
+            result["model_name"],
+            "있음" if result["technical_analysis"] else "없음",
+            len(result["cells_with_significant_change"]) if isinstance(result["cells_with_significant_change"], dict) else 0,
+            len(result["action_plan"]) if isinstance(result["action_plan"], list) else 0,
+            len(result["key_findings"]) if isinstance(result["key_findings"], list) else 0
+        )
+        
+        return result
     
     @staticmethod
     def _extract_peg_comparisons(analysis_result: dict) -> List[Dict[str, Any]]:

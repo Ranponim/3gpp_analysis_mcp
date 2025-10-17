@@ -122,14 +122,14 @@ class PEGCalculator:
                 )
             
             # 기본 통계 계산
-            mean_value = mean(valid_values)
-            std_value = stdev(valid_values) if len(valid_values) > 1 else 0.0
-            median_value = median(valid_values)
-            min_value = min(valid_values)
-            max_value = max(valid_values)
+            mean_value = self._sanitize_float_value(mean(valid_values))
+            std_value = self._sanitize_float_value(stdev(valid_values) if len(valid_values) > 1 else 0.0)
+            median_value = self._sanitize_float_value(median(valid_values))
+            min_value = self._sanitize_float_value(min(valid_values))
+            max_value = self._sanitize_float_value(max(valid_values))
             
             # RSD 계산
-            rsd_value = self._calculate_rsd(valid_values, mean_value)
+            rsd_value = self._sanitize_float_value(self._calculate_rsd(valid_values, mean_value))
             
             result = StatisticalResult(
                 mean=mean_value,
@@ -192,12 +192,40 @@ class PEGCalculator:
             # RSD 계산 (%)
             rsd = (std_value / mean_value) * 100
             
+            # 결과 정규화
+            rsd = self._sanitize_float_value(rsd)
+            
             logger.debug(f"RSD 계산: 표준편차={std_value:.4f}, 평균={mean_value:.4f}, RSD={rsd:.2f}%")
             return rsd
             
         except Exception as e:
             logger.error(f"RSD 계산 중 에러 발생: {e}")
             return 0.0
+    
+    def _sanitize_float_value(self, value: float) -> float:
+        """
+        float 값을 JSON 호환 가능한 값으로 정규화
+        
+        inf, -inf, nan 값을 안전한 값으로 변환합니다.
+        
+        Args:
+            value: 정규화할 float 값
+            
+        Returns:
+            JSON 호환 가능한 float 값
+        """
+        if math.isnan(value):
+            logger.warning("NaN 값을 0.0으로 변환")
+            return 0.0
+        elif math.isinf(value):
+            if value > 0:
+                logger.warning("양의 무한대 값을 999999.0으로 변환")
+                return 999999.0
+            else:
+                logger.warning("음의 무한대 값을 -999999.0으로 변환")
+                return -999999.0
+        else:
+            return value
     
     def calculate_change_percent(self, n1_avg: float, n_avg: float) -> float:
         """
@@ -213,6 +241,10 @@ class PEGCalculator:
         logger.debug(f"변화율 계산: N-1={n1_avg:.2f}, N={n_avg:.2f}")
         
         try:
+            # 입력 값 정규화 (inf, nan 체크)
+            n1_avg = self._sanitize_float_value(n1_avg)
+            n_avg = self._sanitize_float_value(n_avg)
+            
             if n1_avg == 0:
                 if n_avg == 0:
                     logger.warning("N-1과 N 기간 모두 0이므로 변화율을 0으로 설정")
@@ -222,6 +254,9 @@ class PEGCalculator:
                     return 100.0
             
             change_percent = ((n_avg - n1_avg) / n1_avg) * 100
+            
+            # 결과 값 정규화
+            change_percent = self._sanitize_float_value(change_percent)
             
             logger.debug(f"변화율 계산 완료: {change_percent:.2f}%")
             return change_percent
@@ -244,7 +279,15 @@ class PEGCalculator:
         logger.debug(f"절대 변화량 계산: N-1={n1_avg:.2f}, N={n_avg:.2f}")
         
         try:
+            # 입력 값 정규화
+            n1_avg = self._sanitize_float_value(n1_avg)
+            n_avg = self._sanitize_float_value(n_avg)
+            
             change_absolute = n_avg - n1_avg
+            
+            # 결과 값 정규화
+            change_absolute = self._sanitize_float_value(change_absolute)
+            
             logger.debug(f"절대 변화량 계산 완료: {change_absolute:.2f}")
             return change_absolute
             
@@ -369,6 +412,9 @@ class PEGCalculator:
             confidence = base_confidence * count_factor * quality_factor * change_factor
             confidence = max(0.0, min(1.0, confidence))  # 0.0-1.0 범위로 제한
             
+            # 결과 정규화
+            confidence = self._sanitize_float_value(confidence)
+            
             logger.debug(f"신뢰도 계산 완료: {confidence:.3f} (기본:{base_confidence}, 개수:{count_factor}, 품질:{quality_factor}, 변화:{change_factor})")
             return confidence
             
@@ -476,6 +522,9 @@ class PEGCalculator:
                 return 0.0
             
             weighted_avg_change = total_weighted_change / total_weight
+            
+            # 결과 정규화
+            weighted_avg_change = self._sanitize_float_value(weighted_avg_change)
             
             logger.debug(f"가중 평균 변화율 계산 완료: {weighted_avg_change:.2f}%")
             return weighted_avg_change

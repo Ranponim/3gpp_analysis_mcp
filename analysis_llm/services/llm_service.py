@@ -202,7 +202,7 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         return "enhanced_analysis"
 
     def build_prompt(self, processed_df: pd.DataFrame, n1_range: str, n_range: str, **kwargs) -> str:
-        """고도화된 종합 분석 프롬프트 생성"""
+        """고도화된 종합 분석 프롬프트 생성 (YAML 템플릿 사용)"""
         logger.info("EnhancedAnalysisPromptStrategy.build_prompt() 호출")
 
         if not self.validate_input_data(processed_df):
@@ -217,8 +217,28 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         preview_df = processed_df[preview_cols].head(preview_rows)
         data_preview = self.format_dataframe_for_prompt(preview_df)
 
-        # 프롬프트 구성 (연쇄적 사고 진단 워크플로우)
-        prompt = f"""
+        # YAML 프롬프트 템플릿 사용
+        try:
+            from analysis_llm.config.prompt_loader import PromptLoader
+            prompt_loader = PromptLoader()
+            prompt_template = prompt_loader.get_prompt("enhanced")
+            
+            # 변수 치환
+            prompt = prompt_template.format(
+                n1_range=n1_range,
+                n_range=n_range,
+                data_preview=data_preview,
+                selected_pegs_str="All PEGs"  # enhanced 프롬프트에서는 사용하지 않음
+            )
+            
+            logger.info("YAML 템플릿 기반 enhanced 프롬프트 생성 완료: %d자", len(prompt))
+            return prompt
+            
+        except Exception as e:
+            logger.warning("YAML 프롬프트 로드 실패, 하드코딩된 프롬프트 사용: %s", e)
+            
+            # 폴백: 하드코딩된 프롬프트 사용
+            prompt = f"""
 3GPP Cell 성능 고도화 분석 요청 (연쇄적 사고 진단)
 
 **분석 기간:**
@@ -280,8 +300,8 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
 }}
 """
 
-        logger.info("고도화된 분석 프롬프트 생성 완료: %d자", len(prompt))
-        return prompt
+            logger.info("하드코딩된 enhanced 프롬프트 생성 완료: %d자", len(prompt))
+            return prompt
 
 
 class SpecificPEGsAnalysisPromptStrategy(BasePromptStrategy):
@@ -515,7 +535,9 @@ class LLMAnalysisService:
                     "unique_pegs": len(original_df["peg_name"].unique()) if "peg_name" in original_df.columns else 0,
                     "timestamp": datetime.now().isoformat(),
                     "strategy_used": analysis_type,
-                }
+                },
+                "model_name": getattr(self.llm_repository, 'config', {}).get('model', 'unknown'),
+                "model_used": getattr(self.llm_repository, 'config', {}).get('model', 'unknown')
             }
         )
 

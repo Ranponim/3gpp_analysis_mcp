@@ -604,12 +604,17 @@ class MCPHandler:
                 payload.get("analysis_id")
             )
             
+            # numpy 타입을 Python 네이티브 타입으로 변환
+            payload = self._convert_numpy_types(payload)
+            
             # JSON 직렬화 가능 여부 테스트
             try:
                 json.dumps(payload, default=str)
                 self.logger.debug("JSON 직렬화 테스트 성공")
             except Exception as json_err:
                 self.logger.warning("JSON 직렬화 테스트 실패: %s", json_err)
+                # 추가 디버깅을 위해 문제가 되는 값들을 찾아보기
+                self._debug_json_serialization_issues(payload)
             
             return payload
             
@@ -642,7 +647,7 @@ class MCPHandler:
         numpy 타입을 Python 네이티브 타입으로 재귀적 변환
         
         JSON 직렬화를 위해 numpy.int64, numpy.float64 등을 
-        int, float로 변환합니다.
+        int, float로 변환하고, inf/nan 값을 안전한 값으로 변환합니다.
         
         Args:
             obj: 변환할 객체
@@ -651,6 +656,7 @@ class MCPHandler:
             Python 네이티브 타입으로 변환된 객체
         """
         import numpy as np
+        import math
         
         if isinstance(obj, dict):
             return {key: self._convert_numpy_types(value) for key, value in obj.items()}
@@ -661,13 +667,72 @@ class MCPHandler:
         elif isinstance(obj, np.integer):
             return int(obj)
         elif isinstance(obj, np.floating):
-            return float(obj)
+            float_val = float(obj)
+            return self._sanitize_float_value(float_val)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         elif isinstance(obj, (np.bool_, bool)):
             return bool(obj)
+        elif isinstance(obj, float):
+            return self._sanitize_float_value(obj)
         else:
             return obj
+    
+    def _sanitize_float_value(self, value: float) -> float:
+        """
+        float 값을 JSON 호환 가능한 값으로 정규화
+        
+        inf, -inf, nan 값을 안전한 값으로 변환합니다.
+        
+        Args:
+            value: 정규화할 float 값
+            
+        Returns:
+            JSON 호환 가능한 float 값
+        """
+        import math
+        
+        if math.isnan(value):
+            self.logger.warning("NaN 값을 0.0으로 변환")
+            return 0.0
+        elif math.isinf(value):
+            if value > 0:
+                self.logger.warning("양의 무한대 값을 999999.0으로 변환")
+                return 999999.0
+            else:
+                self.logger.warning("음의 무한대 값을 -999999.0으로 변환")
+                return -999999.0
+        else:
+            return value
+    
+    def _debug_json_serialization_issues(self, obj: Any, path: str = "root") -> None:
+        """
+        JSON 직렬화 문제를 디버깅하기 위해 문제가 되는 값들을 찾아 로깅
+        
+        Args:
+            obj: 검사할 객체
+            path: 현재 경로 (디버깅용)
+        """
+        import math
+        
+        try:
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    self._debug_json_serialization_issues(value, f"{path}.{key}")
+            elif isinstance(obj, list):
+                for i, item in enumerate(obj):
+                    self._debug_json_serialization_issues(item, f"{path}[{i}]")
+            elif isinstance(obj, float):
+                if math.isnan(obj):
+                    self.logger.error("❌ NaN 값 발견: %s = %s", path, obj)
+                elif math.isinf(obj):
+                    self.logger.error("❌ 무한대 값 발견: %s = %s", path, obj)
+            elif hasattr(obj, '__dict__'):
+                # 객체의 경우 속성들을 검사
+                for attr_name, attr_value in obj.__dict__.items():
+                    self._debug_json_serialization_issues(attr_value, f"{path}.{attr_name}")
+        except Exception as e:
+            self.logger.error("JSON 직렬화 디버깅 중 오류: %s", e)
     
     def _post_to_backend(self, backend_url: str, payload: dict) -> dict:
         """
