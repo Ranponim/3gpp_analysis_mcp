@@ -272,6 +272,21 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
 
 **요구 출력 형식 (JSON):**
 {{
+  "executive_summary": "네트워크 상태 변화와 식별된 가장 치명적인 문제에 대한 1-2 문장의 최상위 요약",
+  "diagnostic_findings": [
+    {{
+      "primary_hypothesis": "가장 가능성 높은 단일 근본 원인 가설",
+      "supporting_evidence": "데이터 테이블 내에서 가설을 뒷받침하는 다른 PEG 변화나 논리적 근거",
+      "confounding_factors_assessment": "교란 변수들의 가능성에 대한 평가 및 그 근거"
+    }}
+  ],
+  "recommended_actions": [
+    {{
+      "priority": "P1|P2|P3",
+      "action": "구체적 실행 항목",
+      "details": "필요 데이터/도구 및 수행 방법"
+    }}
+  ],
   "summary": "전문가 수준의 종합 요약",
   "key_findings": [
     "데이터 기반 핵심 발견사항들"

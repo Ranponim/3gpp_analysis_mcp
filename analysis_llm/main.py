@@ -1005,12 +1005,22 @@ class MCPHandler:
                 if isinstance(analysis_result, dict):
                     analysis_result = analysis_result.copy()
                     analysis_result['backend_response'] = backend_response
+                    
+                    # 백엔드 응답에서 _id를 analysis_id로 매핑
+                    if isinstance(backend_response, dict) and '_id' in backend_response:
+                        analysis_result['analysis_id'] = backend_response['_id']
+                        self.logger.debug("백엔드 _id를 analysis_id로 매핑: %s", backend_response['_id'])
                 else:
                     analysis_result = {
                         "status": "success",
                         "raw_result": analysis_result,
                         "backend_response": backend_response,
                     }
+                    
+                    # 백엔드 응답에서 _id를 analysis_id로 매핑
+                    if isinstance(backend_response, dict) and '_id' in backend_response:
+                        analysis_result['analysis_id'] = backend_response['_id']
+                        self.logger.debug("백엔드 _id를 analysis_id로 매핑: %s", backend_response['_id'])
                 self.logger.info(
                     "백엔드 업로드 완료: 응답 요약=%s",
                     self._sanitize_for_logging(backend_response) if backend_response else None,

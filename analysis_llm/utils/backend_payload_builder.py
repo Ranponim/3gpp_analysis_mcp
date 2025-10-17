@@ -154,9 +154,14 @@ class BackendPayloadBuilder:
             # PEG 비교
             "peg_comparisons": peg_comparisons,
             
-            # 추적용 ID
+            # 추적용 ID (백엔드 _id를 analysis_id로 매핑)
             "analysis_id": analysis_result.get("analysis_id")
         }
+        
+        # 백엔드 응답에서 _id가 있으면 제거 (중복 방지)
+        if "_id" in payload:
+            del payload["_id"]
+            logger.debug("페이로드에서 _id 필드 제거 (analysis_id 사용)")
         
         logger.info(
             "백엔드 V2 페이로드 생성 완료: ne_id=%s, cell_id=%s, swname=%s, pegs=%d",
@@ -320,7 +325,7 @@ class BackendPayloadBuilder:
         
         # 디버그 로깅: 원본 LLM 데이터 구조 확인
         logger.debug(
-            "LLM 분석 원본 데이터 구조:\n"
+            "🔍 LLM 분석 원본 데이터 구조 분석:\n"
             "  전체 키: %s\n"
             "  summary: %s\n"
             "  key_findings: %s\n"
@@ -331,7 +336,10 @@ class BackendPayloadBuilder:
             "  cells_with_significant_change: %s\n"
             "  action_plan: %s\n"
             "  model_name: %s\n"
-            "  model_used: %s",
+            "  model_used: %s\n"
+            "  executive_summary: %s\n"
+            "  diagnostic_findings: %s\n"
+            "  recommended_actions: %s",
             list(llm_data.keys()) if isinstance(llm_data, dict) else type(llm_data).__name__,
             llm_data.get("summary", "없음"),
             llm_data.get("key_findings", "없음"),
@@ -342,13 +350,33 @@ class BackendPayloadBuilder:
             llm_data.get("cells_with_significant_change", "없음"),
             llm_data.get("action_plan", "없음"),
             llm_data.get("model_name", "없음"),
-            llm_data.get("model_used", "없음")
+            llm_data.get("model_used", "없음"),
+            llm_data.get("executive_summary", "없음"),
+            llm_data.get("diagnostic_findings", "없음"),
+            llm_data.get("recommended_actions", "없음")
+        )
+        
+        # 전체 LLM 데이터 구조를 JSON으로 로깅 (개발용)
+        if isinstance(llm_data, dict) and llm_data:
+            import json
+            logger.debug("🔍 LLM 전체 응답 구조 (JSON):\n%s", json.dumps(llm_data, indent=2, ensure_ascii=False, default=str))
+        
+        # YAML 프롬프트 구조 우선 매핑 (executive_summary, diagnostic_findings, recommended_actions)
+        executive_summary = llm_data.get("executive_summary")
+        diagnostic_findings = llm_data.get("diagnostic_findings", [])
+        recommended_actions = llm_data.get("recommended_actions", [])
+        
+        # 기존 구조와의 호환성을 위한 매핑
+        summary = (
+            executive_summary or
+            llm_data.get("summary") or
+            "분석 요약이 제공되지 않았습니다"
         )
         
         # recommendations 키 매핑 (여러 가능한 키 이름 지원)
         recommendations = (
+            recommended_actions or
             llm_data.get("recommendations") or
-            llm_data.get("recommended_actions") or
             llm_data.get("key_findings") or
             []
         )
@@ -390,11 +418,15 @@ class BackendPayloadBuilder:
         key_findings = llm_data.get("key_findings", [])
         
         result = {
-            "summary": llm_data.get("summary"),
+            "summary": summary,
             "issues": issues,
             "recommendations": recommendations,
             "confidence": confidence,
             "model_name": model_name,
+            # YAML 프롬프트 구조 (우선)
+            "executive_summary": executive_summary,
+            "diagnostic_findings": diagnostic_findings,
+            "recommended_actions": recommended_actions,
             # Enhanced 프롬프트의 추가 필드들
             "technical_analysis": technical_analysis,
             "cells_with_significant_change": cells_with_significant_change,
@@ -404,8 +436,11 @@ class BackendPayloadBuilder:
         
         # 디버그 로깅: 추출된 결과 확인
         logger.debug(
-            "LLM 분석 추출 결과:\n"
+            "✅ LLM 분석 추출 결과:\n"
             "  summary: %s\n"
+            "  executive_summary: %s\n"
+            "  diagnostic_findings: %d개\n"
+            "  recommended_actions: %d개\n"
             "  issues: %d개\n"
             "  recommendations: %d개\n"
             "  confidence: %s\n"
@@ -415,6 +450,9 @@ class BackendPayloadBuilder:
             "  action_plan: %d개\n"
             "  key_findings: %d개",
             "있음" if result["summary"] else "없음",
+            "있음" if result["executive_summary"] else "없음",
+            len(result["diagnostic_findings"]) if isinstance(result["diagnostic_findings"], list) else 0,
+            len(result["recommended_actions"]) if isinstance(result["recommended_actions"], list) else 0,
             len(result["issues"]) if isinstance(result["issues"], list) else 0,
             len(result["recommendations"]) if isinstance(result["recommendations"], list) else 0,
             result["confidence"],
