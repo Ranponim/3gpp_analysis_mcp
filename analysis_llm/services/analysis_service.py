@@ -452,8 +452,8 @@ class AnalysisService:
         logger.info("perform_analysis() 호출: 전체 분석 워크플로우 시작")
 
         try:
-            # 1단계: 요청 검증
-            logger.info("1단계: 요청 검증")
+            # [ANALYSIS-1] 요청 검증
+            logger.info("[ANALYSIS-1] 요청 검증")
             self.validate_request(request)
             logger.debug(
                 "요청 필드 요약: keys=%s, backend_url=%s",
@@ -461,8 +461,8 @@ class AnalysisService:
                 bool(request.get("backend_url")),
             )
 
-            # 2단계: 시간 범위 파싱
-            logger.info("2단계: 시간 범위 파싱")
+            # [ANALYSIS-2] 시간 범위 파싱
+            logger.info("[ANALYSIS-2] 시간 범위 파싱")
             time_ranges = self.parse_time_ranges(request)
             logger.debug(
                 "시간 범위 파싱 결과: N-1=%s~%s, N=%s~%s",
@@ -472,9 +472,9 @@ class AnalysisService:
                 time_ranges[3],
             )
 
-            # 3단계: PEG 데이터 처리 (PEGProcessingService 사용)
+            # [ANALYSIS-3] PEG 데이터 처리 (PEGProcessingService 사용)
             if self.peg_processing_service:
-                logger.info("3단계: PEG 데이터 처리 (PEGProcessingService 위임)")
+                logger.info("[ANALYSIS-3] PEG 데이터 처리 (PEGProcessingService 위임)")
 
                 # 테이블 설정 준비
                 table_config = {
@@ -572,8 +572,8 @@ class AnalysisService:
                 # END DEPRECATED
                 # ================================================================
 
-            # 4단계: LLM 분석
-            logger.info("4단계: LLM 분석")
+            # [ANALYSIS-4] LLM 분석
+            logger.info("[ANALYSIS-4] LLM 분석")
             analysis_type = request.get("analysis_type", "enhanced")
             enable_mock = request.get("enable_mock", False)
             logger.debug(
@@ -590,14 +590,14 @@ class AnalysisService:
                 enable_mock=enable_mock,
             )
 
-            # 4.5단계: Choi Deterministic 판정 (옵션)
+            # [ANALYSIS-4.5] Choi Deterministic 판정 (옵션)
             # 요청 파라미터 > 환경변수 > 기본값 순으로 우선순위 적용
             from config.settings import get_settings
             settings = get_settings()
             use_choi = bool(request.get("use_choi", settings.peg_use_choi))
             choi_result_normalized = None
             if use_choi:
-                logger.info("4.5단계: Choi Deterministic 판정 실행")
+                logger.info("[ANALYSIS-4.5] Choi Deterministic 판정 실행")
                 try:
                     from .deterministic_judgement_service import run_choi_judgement
                     # MCP 표준 요청 바디 생성(백엔드 요구 형태와 동일 구조 사용)
@@ -617,8 +617,8 @@ class AnalysisService:
                         "warnings": [str(e)],
                     }
 
-            # 5단계: 데이터 변환 (DataProcessor 사용)
-            logger.info("5단계: 데이터 변환 (DataProcessor 위임)")
+            # [ANALYSIS-5] 데이터 변환 (DataProcessor 사용)
+            logger.info("[ANALYSIS-5] 데이터 변환 (DataProcessor 위임)")
             try:
                 analyzed_peg_results = self.data_processor.process_data(
                     processed_df=processed_df, llm_analysis_results=llm_result
@@ -631,8 +631,8 @@ class AnalysisService:
                     f"데이터 변환 실패: {e.message}", workflow_step="data_transformation", details=e.to_dict()
                 ) from e
 
-            # 6단계: 결과 조립 (DataProcessor 결과 활용)
-            logger.info("6단계: 결과 조립")
+            # [ANALYSIS-6] 결과 조립 (DataProcessor 결과 활용)
+            logger.info("[ANALYSIS-6] 결과 조립")
             
             # DB 식별자 추출 (processed_df에서)
             db_identifiers = self._extract_db_identifiers(processed_df, request)
@@ -646,9 +646,9 @@ class AnalysisService:
             )
             logger.debug("최종 결과 조립 완료: keys=%s", list(final_result.keys()))
 
-            # 6.5단계: peg_analysis에 choi_judgement 병합(옵션)
+            # [ANALYSIS-6.5] peg_analysis에 choi_judgement 병합(옵션)
             if choi_result_normalized is not None:
-                logger.info("6.5단계: peg_analysis.choi_judgement 병합")
+                logger.info("[ANALYSIS-6.5] peg_analysis.choi_judgement 병합")
                 peg_analysis = final_result.setdefault("peg_analysis", {})
                 peg_analysis["choi_judgement"] = choi_result_normalized
 

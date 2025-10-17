@@ -119,11 +119,10 @@ class BackendPayloadBuilder:
         # llm_analysis가 None일 수 있으므로 안전하게 처리
         if llm_analysis and isinstance(llm_analysis, dict):
             logger.debug(
-                "추출된 llm_analysis: summary=%s, issues=%d개, recommendations=%d개, confidence=%s, model=%s",
-                "있음" if llm_analysis.get("summary") else "없음",
-                len(llm_analysis.get("issues", [])),
-                len(llm_analysis.get("recommendations", [])),
-                llm_analysis.get("confidence"),
+                "추출된 llm_analysis (Enhanced): executive_summary=%s, diagnostic_findings=%d개, recommended_actions=%d개, model=%s",
+                "있음" if llm_analysis.get("executive_summary") else "없음",
+                len(llm_analysis.get("diagnostic_findings", [])),
+                len(llm_analysis.get("recommended_actions", [])),
                 llm_analysis.get("model_name")
             )
         else:
@@ -323,37 +322,27 @@ class BackendPayloadBuilder:
         """
         llm_data = analysis_result.get("llm_analysis", {})
         
-        # 디버그 로깅: 원본 LLM 데이터 구조 확인
+        # 디버그 로깅: 원본 LLM 데이터 구조 확인 (Enhanced 프롬프트 필드만)
         logger.debug(
-            "🔍 LLM 분석 원본 데이터 구조 분석:\n"
+            "🔍 LLM 분석 원본 데이터 구조 분석 (Enhanced 프롬프트):\n"
             "  전체 키: %s\n"
-            "  summary: %s\n"
-            "  key_findings: %s\n"
-            "  recommendations: %s\n"
-            "  issues: %s\n"
-            "  critical_issues: %s\n"
+            "  executive_summary: %s\n"
+            "  diagnostic_findings: %s\n"
+            "  recommended_actions: %s\n"
             "  technical_analysis: %s\n"
             "  cells_with_significant_change: %s\n"
             "  action_plan: %s\n"
-            "  model_name: %s\n"
-            "  model_used: %s\n"
-            "  executive_summary: %s\n"
-            "  diagnostic_findings: %s\n"
-            "  recommended_actions: %s",
+            "  key_findings: %s\n"
+            "  model_name: %s",
             list(llm_data.keys()) if isinstance(llm_data, dict) else type(llm_data).__name__,
-            llm_data.get("summary", "없음"),
-            llm_data.get("key_findings", "없음"),
-            llm_data.get("recommendations", "없음"),
-            llm_data.get("issues", "없음"),
-            llm_data.get("critical_issues", "없음"),
+            llm_data.get("executive_summary", "없음"),
+            llm_data.get("diagnostic_findings", "없음"),
+            llm_data.get("recommended_actions", "없음"),
             llm_data.get("technical_analysis", "없음"),
             llm_data.get("cells_with_significant_change", "없음"),
             llm_data.get("action_plan", "없음"),
-            llm_data.get("model_name", "없음"),
-            llm_data.get("model_used", "없음"),
-            llm_data.get("executive_summary", "없음"),
-            llm_data.get("diagnostic_findings", "없음"),
-            llm_data.get("recommended_actions", "없음")
+            llm_data.get("key_findings", "없음"),
+            llm_data.get("model_name", "없음")
         )
         
         # 전체 LLM 데이터 구조를 JSON으로 로깅 (개발용)
@@ -361,43 +350,12 @@ class BackendPayloadBuilder:
             import json
             logger.debug("🔍 LLM 전체 응답 구조 (JSON):\n%s", json.dumps(llm_data, indent=2, ensure_ascii=False, default=str))
         
-        # YAML 프롬프트 구조 우선 매핑 (executive_summary, diagnostic_findings, recommended_actions)
+        # Enhanced 프롬프트 구조만 사용 (기존 호환성 필드 제거)
         executive_summary = llm_data.get("executive_summary")
         diagnostic_findings = llm_data.get("diagnostic_findings", [])
         recommended_actions = llm_data.get("recommended_actions", [])
         
-        # 기존 구조와의 호환성을 위한 매핑
-        summary = (
-            executive_summary or
-            llm_data.get("summary") or
-            "분석 요약이 제공되지 않았습니다"
-        )
-        
-        # recommendations 키 매핑 (여러 가능한 키 이름 지원)
-        recommendations = (
-            recommended_actions or
-            llm_data.get("recommendations") or
-            llm_data.get("key_findings") or
-            []
-        )
-        
-        # issues 키 매핑 (여러 가능한 키 이름 지원)
-        issues = (
-            llm_data.get("issues") or
-            llm_data.get("critical_issues") or
-            llm_data.get("technical_analysis", {}).get("critical_issues") or
-            []
-        )
-        
-        # confidence 키 매핑 (여러 가능한 키 이름 지원)
-        confidence = (
-            llm_data.get("confidence") or
-            llm_data.get("analysis_confidence") or
-            llm_data.get("technical_analysis", {}).get("confidence") or
-            llm_data.get("technical_analysis", {}).get("confidence_level")
-        )
-        
-        # model_name 키 매핑 (여러 가능한 키 이름 지원)
+        # model_name만 유지 (LLM 서비스에서 추가하는 메타데이터)
         model_name = (
             llm_data.get("model_name") or
             llm_data.get("model") or
@@ -418,12 +376,7 @@ class BackendPayloadBuilder:
         key_findings = llm_data.get("key_findings", [])
         
         result = {
-            "summary": summary,
-            "issues": issues,
-            "recommendations": recommendations,
-            "confidence": confidence,
-            "model_name": model_name,
-            # YAML 프롬프트 구조 (우선)
+            # Enhanced 프롬프트 구조만 사용
             "executive_summary": executive_summary,
             "diagnostic_findings": diagnostic_findings,
             "recommended_actions": recommended_actions,
@@ -431,36 +384,30 @@ class BackendPayloadBuilder:
             "technical_analysis": technical_analysis,
             "cells_with_significant_change": cells_with_significant_change,
             "action_plan": action_plan,
-            "key_findings": key_findings
+            "key_findings": key_findings,
+            # 메타데이터
+            "model_name": model_name
         }
         
-        # 디버그 로깅: 추출된 결과 확인
+        # 디버그 로깅: 추출된 결과 확인 (Enhanced 프롬프트 필드만)
         logger.debug(
-            "✅ LLM 분석 추출 결과:\n"
-            "  summary: %s\n"
+            "✅ LLM 분석 추출 결과 (Enhanced 프롬프트):\n"
             "  executive_summary: %s\n"
             "  diagnostic_findings: %d개\n"
             "  recommended_actions: %d개\n"
-            "  issues: %d개\n"
-            "  recommendations: %d개\n"
-            "  confidence: %s\n"
-            "  model_name: %s\n"
             "  technical_analysis: %s\n"
             "  cells_with_significant_change: %d개\n"
             "  action_plan: %d개\n"
-            "  key_findings: %d개",
-            "있음" if result["summary"] else "없음",
+            "  key_findings: %d개\n"
+            "  model_name: %s",
             "있음" if result["executive_summary"] else "없음",
             len(result["diagnostic_findings"]) if isinstance(result["diagnostic_findings"], list) else 0,
             len(result["recommended_actions"]) if isinstance(result["recommended_actions"], list) else 0,
-            len(result["issues"]) if isinstance(result["issues"], list) else 0,
-            len(result["recommendations"]) if isinstance(result["recommendations"], list) else 0,
-            result["confidence"],
-            result["model_name"],
             "있음" if result["technical_analysis"] else "없음",
             len(result["cells_with_significant_change"]) if isinstance(result["cells_with_significant_change"], dict) else 0,
             len(result["action_plan"]) if isinstance(result["action_plan"], list) else 0,
-            len(result["key_findings"]) if isinstance(result["key_findings"], list) else 0
+            len(result["key_findings"]) if isinstance(result["key_findings"], list) else 0,
+            result["model_name"]
         )
         
         return result

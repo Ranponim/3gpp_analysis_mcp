@@ -42,16 +42,16 @@ prompts:
     [분석 워크플로우 지침]
     아래의 4단계 연쇄적 사고(Chain-of-Thought) 진단 워크플로우를 엄격히 따라서 분석을 수행하십시오.
 
-    # 1단계: 문제 분류 및 중요도 평가 (Triage and Significance Assessment)
+    # [LLM-1] 문제 분류 및 중요도 평가 (Triage and Significance Assessment)
     먼저, 입력 테이블의 모든 PEG를 검토하여 가장 심각한 '부정적' 변화를 보인 상위 3~5개의 PEG를 식별하십시오. '중요도'는 'pct_change'의 절대값 크기와 해당 PEG의 운영상 '고객 영향도'를 종합하여 판단합니다. 각 PEG가 영향을 미치는 3GPP 서비스 범주(Accessibility, Retainability, Mobility, Integrity, Latency)에 따라 영향도를 분류하고, 가장 시급하게 다루어야 할 문제를 선정하십시오.
 
-    # 2단계: 주제별 그룹화 및 핵심 가설 생성 (Thematic Grouping and Primary Hypothesis Generation)
-    1단계에서 식별된 우선순위가 높은 문제들에 대해, 연관된 PEG들을 논리적으로 그룹화하여 '진단 주제(Diagnostic Theme)'를 정의하십시오. (예: 다수의 접속 관련 PEG 악화 -> 'Accessibility Degradation' 주제). 각 주제에 대해, 3GPP 호 처리 절차(Call Flow) 및 운영 경험에 기반하여 가장 개연성 높은 단일 '핵심 가설(Primary Hypothesis)'을 수립하십시오. 이 가설은 구체적이고 검증 가능해야 합니다.
+    # [LLM-2] 주제별 그룹화 및 핵심 가설 생성 (Thematic Grouping and Primary Hypothesis Generation)
+    [LLM-1]에서 식별된 우선순위가 높은 문제들에 대해, 연관된 PEG들을 논리적으로 그룹화하여 '진단 주제(Diagnostic Theme)'를 정의하십시오. (예: 다수의 접속 관련 PEG 악화 -> 'Accessibility Degradation' 주제). 각 주제에 대해, 3GPP 호 처리 절차(Call Flow) 및 운영 경험에 기반하여 가장 개연성 높은 단일 '핵심 가설(Primary Hypothesis)'을 수립하십시오. 이 가설은 구체적이고 검증 가능해야 합니다.
 
-    # 3단계: 시스템적 요인 분석 및 교란 변수 고려 (Systemic Factor Analysis & Confounding Variable Assessment)
+    # [LLM-3] 시스템적 요인 분석 및 교란 변수 고려 (Systemic Factor Analysis & Confounding Variable Assessment)
     수립한 핵심 가설을 검증하기 위해, 전체 데이터 테이블에서 가설을 뒷받침하거나(supporting evidence) 반박하는(contradictory evidence) 다른 PEG 변화를 분석하십시오. 또한, '동일 환경' 가정이 깨질 수 있는 잠재적 교란 요인(예: 라우팅 정책 변경, 소프트웨어 마이너 패치, 특정 파라미터 롤백, 단말기 믹스 변화)을 명시적으로 고려하고, 이러한 요인들이 현재 문제의 원인일 가능성이 높은지 낮은지, 그리고 그 판단의 근거는 무엇인지 논리적으로 기술하십시오.
 
-    # 4단계: 증거 기반의 검증 계획 수립 (Formulation of an Evidence-Based Verification Plan)
+    # [LLM-4] 증거 기반의 검증 계획 수립 (Formulation of an Evidence-Based Verification Plan)
     각 핵심 가설에 대해, 현장 엔지니어가 즉시 수행할 수 있는 구체적이고 우선순위가 부여된 '검증 계획'을 수립하십시오. 조치는 반드시 구체적이어야 합니다. (예: '로그 확인' 대신 '특정 카운터(pmRachAtt) 추이 분석'). 조치별로 P1(즉시 조치), P2(심층 조사), P3(정기 감사)와 같은 우선순위를 부여하고, 필요한 데이터(카운터, 파라미터 등)나 도구를 명시하십시오.
 
     [출력 형식 제약]

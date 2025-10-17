@@ -512,24 +512,24 @@ class RequestValidator:
         self.logger.info("validate_request() 호출: 전체 요청 검증 시작")
 
         try:
-            # 1단계: 구조 검증
-            self.logger.info("1단계: 구조 검증")
+            # [VALIDATOR-1] 구조 검증
+            self.logger.info("[VALIDATOR-1] 구조 검증")
             self.validate_structure(request)
 
-            # 2단계: 필수 필드 검증
-            self.logger.info("2단계: 필수 필드 검증")
+            # [VALIDATOR-2] 필수 필드 검증
+            self.logger.info("[VALIDATOR-2] 필수 필드 검증")
             self.validate_required_fields(request)
 
-            # 3단계: 스칼라 매개변수 검증
-            self.logger.info("3단계: 스칼라 매개변수 검증")
+            # [VALIDATOR-3] 스칼라 매개변수 검증
+            self.logger.info("[VALIDATOR-3] 스칼라 매개변수 검증")
             self.validate_scalar_parameters(request)
 
-            # 4단계: 시간 범위 검증
-            self.logger.info("4단계: 시간 범위 검증")
+            # [VALIDATOR-4] 시간 범위 검증
+            self.logger.info("[VALIDATOR-4] 시간 범위 검증")
             self.validate_time_ranges(request)
 
-            # 5단계: 중첩 구조 검증
-            self.logger.info("5단계: 중첩 구조 검증")
+            # [VALIDATOR-5] 중첩 구조 검증
+            self.logger.info("[VALIDATOR-5] 중첩 구조 검증")
 
             # DB 설정 검증 (선택적)
             if "db" in request and request["db"]:
@@ -548,8 +548,8 @@ class RequestValidator:
             if peg_config:
                 self.validate_peg_config(peg_config)
 
-            # 6단계: 정규화 (기본값 적용)
-            self.logger.info("6단계: 요청 정규화")
+            # [VALIDATOR-6] 정규화 (기본값 적용)
+            self.logger.info("[VALIDATOR-6] 요청 정규화")
             normalized_request = self._normalize_request(request)
 
             self.logger.info("전체 요청 검증 완료: %d개 필드", len(normalized_request))

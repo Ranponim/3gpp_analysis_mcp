@@ -941,12 +941,12 @@ class MCPHandler:
         )
         
         try:
-            # 1단계: 기본 요청 검증
-            self.logger.info("1단계: 기본 요청 검증")
+            # [MCP-1] 기본 요청 검증
+            self.logger.info("[MCP-1] 기본 요청 검증")
             self._validate_basic_request(request)
             
-            # 2단계: 요청 형식 변환
-            self.logger.info("2단계: 요청 형식 변환")
+            # [MCP-2] 요청 형식 변환
+            self.logger.info("[MCP-2] 요청 형식 변환")
             analysis_request = self._parse_request_to_analysis_format(request)
             self.logger.debug(
                 "AnalysisService 전달용 요청 요약: %s",
@@ -961,13 +961,13 @@ class MCPHandler:
                 },
             )
             
-            # 3단계: AnalysisService 생성 (필요시)
+            # [MCP-3] AnalysisService 생성 (필요시)
             if not self.analysis_service:
-                self.logger.info("3단계: AnalysisService 생성")
+                self.logger.info("[MCP-3] AnalysisService 생성")
                 self.analysis_service = self._create_analysis_service()
             
-            # 4단계: 분석 실행
-            self.logger.info("4단계: 분석 실행 (AnalysisService 위임)")
+            # [MCP-4] 분석 실행
+            self.logger.info("[MCP-4] 분석 실행 (AnalysisService 위임)")
             self.logger.debug(
                 "AnalysisService.perform_analysis 호출 준비 | backend_url=%s | table=%s | columns=%s",
                 analysis_request.get('backend_url'),
@@ -983,7 +983,7 @@ class MCPHandler:
 
             backend_url = analysis_request.get('backend_url')
             if backend_url:
-                self.logger.info("4.5단계: 백엔드 업로드 실행")
+                self.logger.info("[MCP-4.5] 백엔드 업로드 실행")
                 backend_payload = self._build_backend_payload(analysis_result, analysis_request)
                 self.logger.debug(
                     "백엔드 업로드 페이로드 키: %s",
@@ -1026,8 +1026,8 @@ class MCPHandler:
                     self._sanitize_for_logging(backend_response) if backend_response else None,
                 )
             
-            # 5단계: 응답 형식 변환
-            self.logger.info("5단계: MCP 응답 형식 변환")
+            # [MCP-5] 응답 형식 변환
+            self.logger.info("[MCP-5] MCP 응답 형식 변환")
             mcp_response = self._format_response_for_mcp(analysis_result)
             
             self.logger.info("=" * 20 + " MCP Handler 요청 처리 완료 " + "=" * 20)
