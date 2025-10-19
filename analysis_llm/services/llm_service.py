@@ -166,40 +166,42 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         except Exception as e:
             logger.warning("YAML 프롬프트 로드 실패, 하드코딩된 프롬프트 사용: %s", e)
             
-            # 폴백: 하드코딩된 프롬프트 사용
-            prompt = f"""
-3GPP Cell 성능 고도화 분석 요청 (연쇄적 사고 진단)
+            # 폴백: 하드코딩된 프롬프트 사용 (YAML과 동일한 구조)
+            prompt = f"""[페르소나 및 임무]
+당신은 Tier-1 이동통신사에서 20년 경력을 가진 수석 네트워크 진단 및 최적화 전략가입니다. 당신의 임무는 신속한 근본 원인 분석(RCA)을 수행하고, 고객 영향도에 따라 문제의 우선순위를 정하며, 현장 엔지니어링 팀을 위한 명확하고 실행 가능한 계획을 제공하는 것입니다. 당신의 분석은 3GPP 표준(TS 36/38.xxx 시리즈)과 운영 모범 사례에 부합해야 하며, 엄격하고 증거에 기반해야 합니다.
 
-**분석 기간:**
-- N-1 기간: {n1_range}
-- N 기간: {n_range}
+[컨텍스트 및 가정]
+- 분석 대상은 두 기간 동안의 PEG(Performance Event Group) 카운터 변화입니다.
+- 기간 n-1: {n1_range}
+- 기간 n: {n_range}
+- 핵심 가정: 두 기간은 동일한 시험환경(동일 하드웨어, 기본 파라미터, 트래픽 모델)에서 수행되었습니다.
+- 입력 데이터는 PEG 단위로 집계된 평균값이며, 개별 셀(cell) 데이터는 포함되어 있지 않습니다. 따라서 셀 단위의 특정 문제 식별은 불가능하며, 집계 데이터 기반의 거시적 분석을 수행해야 합니다.
 
-**PEG 집계 데이터:**
+[입력 데이터]
+- 컬럼 설명: peg_name(PEG 이름), avg_n_minus_1(기간 n-1 평균), avg_n(기간 n 평균), diff(변화량), pct_change(변화율)
+- 데이터 테이블:
 {data_preview}
 
-**분석 워크플로우:**
+[분석 워크플로우 지침]
+아래의 4단계 연쇄적 사고(Chain-of-Thought) 진단 워크플로우를 엄격히 따라서 분석을 수행하십시오.
 
-1️⃣ **데이터 품질 검증**
-- 데이터 완성도 및 이상치 확인
-- 측정 신뢰성 평가
+# [LLM-1] 문제 분류 및 중요도 평가 (Triage and Significance Assessment)
+먼저, 입력 테이블의 모든 PEG를 검토하여 가장 심각한 '부정적' 변화를 보인 상위 3~5개의 PEG를 식별하십시오. '중요도'는 'pct_change'의 절대값 크기와 해당 PEG의 운영상 '고객 영향도'를 종합하여 판단합니다. 각 PEG가 영향을 미치는 3GPP 서비스 범주(Accessibility, Retainability, Mobility, Integrity, Latency)에 따라 영향도를 분류하고, 가장 시급하게 다루어야 할 문제를 선정하십시오.
 
-2️⃣ **성능 트렌드 분석**
-- N-1 → N 기간 변화율 분석
-- 성능 개선/악화 패턴 식별
+# [LLM-2] 주제별 그룹화 및 핵심 가설 생성 (Thematic Grouping and Primary Hypothesis Generation)
+[LLM-1]에서 식별된 우선순위가 높은 문제들에 대해, 연관된 PEG들을 논리적으로 그룹화하여 '진단 주제(Diagnostic Theme)'를 정의하십시오. (예: 다수의 접속 관련 PEG 악화 -> 'Accessibility Degradation' 주제). 각 주제에 대해, 3GPP 호 처리 절차(Call Flow) 및 운영 경험에 기반하여 가장 개연성 높은 단일 '핵심 가설(Primary Hypothesis)'을 수립하십시오. 이 가설은 구체적이고 검증 가능해야 합니다.
 
-3️⃣ **임계값 및 이상 상황 탐지**
-- KPI 임계값 위반 확인
-- 급격한 성능 변화 감지
+# [LLM-3] 시스템적 요인 분석 및 교란 변수 고려 (Systemic Factor Analysis & Confounding Variable Assessment)
+수립한 핵심 가설을 검증하기 위해, 전체 데이터 테이블에서 가설을 뒷받침하거나(supporting evidence) 반박하는(contradictory evidence) 다른 PEG 변화를 분석하십시오. 또한, '동일 환경' 가정이 깨질 수 있는 잠재적 교란 요인(예: 라우팅 정책 변경, 소프트웨어 마이너 패치, 특정 파라미터 롤백, 단말기 믹스 변화)을 명시적으로 고려하고, 이러한 요인들이 현재 문제의 원인일 가능성이 높은지 낮은지, 그리고 그 판단의 근거는 무엇인지 논리적으로 기술하십시오.
 
-4️⃣ **근본 원인 분석**
-- 성능 변화의 잠재적 원인 추론
-- Cell간 상관관계 분석
+# [LLM-4] 증거 기반의 검증 계획 수립 (Formulation of an Evidence-Based Verification Plan)
+각 핵심 가설에 대해, 현장 엔지니어가 즉시 수행할 수 있는 구체적이고 우선순위가 부여된 '검증 계획'을 수립하십시오. 조치는 반드시 구체적이어야 합니다. (예: '로그 확인' 대신 '특정 카운터(pmRachAtt) 추이 분석'). 조치별로 P1(즉시 조치), P2(심층 조사), P3(정기 감사)와 같은 우선순위를 부여하고, 필요한 데이터(카운터, 파라미터 등)나 도구를 명시하십시오.
 
-5️⃣ **실행 가능한 권고사항**
-- 구체적이고 측정 가능한 개선 방안
-- 우선순위별 액션 플랜
+[출력 형식 제약]
+- 분석 결과는 반드시 아래의 JSON 스키마를 정확히 준수하여 생성해야 합니다.
+- 모든 문자열 값은 한국어로 작성하십시오.
+- 각 필드에 대한 설명과 열거형(Enum) 값을 반드시 따르십시오.
 
-**요구 출력 형식 (JSON):**
 {{
   "executive_summary": "네트워크 상태 변화와 식별된 가장 치명적인 문제에 대한 1-2 문장의 최상위 요약",
   "diagnostic_findings": [
@@ -215,34 +217,8 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
       "action": "구체적 실행 항목",
       "details": "필요 데이터/도구 및 수행 방법"
     }}
-  ],
-  "summary": "전문가 수준의 종합 요약",
-  "key_findings": [
-    "데이터 기반 핵심 발견사항들"
-  ],
-  "recommendations": [
-    "실행 가능한 구체적 권고사항들"
-  ],
-  "technical_analysis": {{
-    "overall_status": "GOOD/WARNING/CRITICAL",
-    "critical_issues": ["발견된 중요 이슈들"],
-    "performance_trends": "상세 트렌드 분석",
-    "data_quality_score": "HIGH/MEDIUM/LOW",
-    "confidence_level": "HIGH/MEDIUM/LOW"
-  }},
-  "cells_with_significant_change": {{
-    "CELL_ID": "변화 원인 및 영향 분석"
-  }},
-  "action_plan": [
-    {{
-      "priority": "HIGH/MEDIUM/LOW",
-      "action": "구체적 액션",
-      "expected_impact": "예상 효과",
-      "timeframe": "실행 기간"
-    }}
   ]
-}}
-"""
+}}"""
 
             logger.info("하드코딩된 enhanced 프롬프트 생성 완료: %d자", len(prompt))
             return prompt
@@ -484,22 +460,17 @@ class LLMAnalysisService:
             }
         )
 
-        # 기본 필드 보장
-        default_fields = {
-            "summary": "분석 요약이 제공되지 않았습니다",
-            "key_findings": [],
-            "recommendations": [],
-            "technical_analysis": {
-                "overall_status": "UNKNOWN",
-                "critical_issues": [],
-                "performance_trends": "분석되지 않음",
-            },
+        # Enhanced 프롬프트 구조 필드만 보장
+        enhanced_default_fields = {
+            "executive_summary": "분석 요약이 제공되지 않았습니다",
+            "diagnostic_findings": [],
+            "recommended_actions": [],
         }
 
-        for field, default_value in default_fields.items():
+        for field, default_value in enhanced_default_fields.items():
             if field not in enhanced_result:
                 enhanced_result[field] = default_value
-                logger.debug("기본 필드 추가: %s", field)
+                logger.debug("Enhanced 기본 필드 추가: %s", field)
 
         logger.debug("분석 결과 후처리 완료: %d개 필드", len(enhanced_result))
         return enhanced_result

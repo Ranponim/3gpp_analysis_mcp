@@ -221,26 +221,26 @@ class ResponseFormatter:
             return None
 
         try:
-            # LLMAnalysisResult 형식으로 변환
-            summary = llm_analysis.get("summary", "")
-            key_insights = llm_analysis.get("key_insights", [])
-            recommendations = llm_analysis.get("recommendations", [])
+            # LLMAnalysisResult 형식으로 변환 (Enhanced 구조)
+            executive_summary = llm_analysis.get("executive_summary", "")
+            diagnostic_findings = llm_analysis.get("diagnostic_findings", [])
+            recommended_actions = llm_analysis.get("recommended_actions", [])
 
             # 문자열로 변환 (LLMAnalysisResult 모델에 맞춤)
-            if isinstance(key_insights, list):
-                key_insights_str = "; ".join(key_insights)
+            if isinstance(diagnostic_findings, list):
+                diagnostic_findings_str = "; ".join([str(finding) for finding in diagnostic_findings])
             else:
-                key_insights_str = str(key_insights)
+                diagnostic_findings_str = str(diagnostic_findings)
 
-            if isinstance(recommendations, list):
-                recommendations_str = "; ".join(recommendations)
+            if isinstance(recommended_actions, list):
+                recommended_actions_str = "; ".join([str(action) for action in recommended_actions])
             else:
-                recommendations_str = str(recommendations)
+                recommended_actions_str = str(recommended_actions)
 
             llm_result = LLMAnalysisResult(
-                integrated_analysis=summary,
-                specific_peg_analysis=key_insights_str,
-                recommendations=recommendations_str,
+                integrated_analysis=executive_summary,
+                specific_peg_analysis=diagnostic_findings_str,
+                recommendations=recommended_actions_str,
                 confidence_score=llm_analysis.get("confidence_score", 0.8),  # 기본값
                 model_used=llm_analysis.get("model_used", "unknown"),
                 tokens_used=llm_analysis.get("tokens_used", 0),

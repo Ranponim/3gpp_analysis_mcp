@@ -176,16 +176,16 @@ class AnalysisService:
         if not isinstance(llm_result, dict):
             return {}
 
-        summary = (
-            llm_result.get("summary")
-            or llm_result.get("executive_summary")
-        )
+        executive_summary = llm_result.get("executive_summary")
 
         return {
-            "summary": summary,
-            "issues": llm_result.get("issues"),
-            "recommended_actions": llm_result.get("recommended_actions"),
-            "peg_insights": llm_result.get("peg_insights", {}),
+            "executive_summary": executive_summary,
+            "diagnostic_findings": llm_result.get("diagnostic_findings", []),
+            "recommended_actions": llm_result.get("recommended_actions", []),
+            "technical_analysis": llm_result.get("technical_analysis", {}),
+            "cells_with_significant_change": llm_result.get("cells_with_significant_change", {}),
+            "action_plan": llm_result.get("action_plan", []),
+            "key_findings": llm_result.get("key_findings", []),
             "confidence": llm_result.get("confidence") or llm_result.get("confidence_score"),
             "model": llm_result.get("model") or llm_result.get("model_used"),
         }

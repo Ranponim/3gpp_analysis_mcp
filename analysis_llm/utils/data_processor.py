@@ -256,7 +256,7 @@ class DataProcessor:
 
             # 중복 데이터 감지 및 로깅 (pivot 실패 방지)
             self.logger.debug("pivot 실행 전 중복 데이터 검사 시작")
-            duplicates = processed_df[processed_df.duplicated(subset=['peg_name', 'period'], keep=False)]
+            duplicates = processed_df[processed_df.duplicated(subset=['peg_name', 'period', 'avg_value'], keep=False)]
             
             if not duplicates.empty:
                 unique_peg_count = duplicates['peg_name'].nunique()
