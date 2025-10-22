@@ -312,101 +312,97 @@ class BackendPayloadBuilder:
     @staticmethod
     def _extract_llm_analysis(analysis_result: dict) -> Dict[str, Any]:
         """
-        LLM 분석 결과 추출
+        LLM 분석 결과 추출 (Enhanced 프롬프트 구조 그대로 전송)
+        
+        전송 구조:
+        - executive_summary: 전체 요약 (str)
+        - diagnostic_findings: 진단 결과 리스트 (list of dict)
+          - primary_hypothesis
+          - supporting_evidence
+          - confounding_factors_assessment
+        - recommended_actions: 권장 조치 리스트 (list of dict)
+          - priority
+          - action
+          - details
         
         Args:
             analysis_result: AnalysisService 결과
             
         Returns:
-            LLM 분석 결과
+            Enhanced 프롬프트 원본 구조
         """
         llm_data = analysis_result.get("llm_analysis", {})
         
-        # 디버그 로깅: 원본 LLM 데이터 구조 확인 (Enhanced 프롬프트 필드만)
+        # 디버그 로깅: 원본 LLM 데이터 구조 확인
         logger.debug(
             "🔍 LLM 분석 원본 데이터 구조 분석 (Enhanced 프롬프트):\n"
             "  전체 키: %s\n"
             "  executive_summary: %s\n"
             "  diagnostic_findings: %s\n"
-            "  recommended_actions: %s\n"
-            "  technical_analysis: %s\n"
-            "  cells_with_significant_change: %s\n"
-            "  action_plan: %s\n"
-            "  key_findings: %s\n"
-            "  model_name: %s",
+            "  recommended_actions: %s",
             list(llm_data.keys()) if isinstance(llm_data, dict) else type(llm_data).__name__,
-            llm_data.get("executive_summary", "없음"),
-            llm_data.get("diagnostic_findings", "없음"),
-            llm_data.get("recommended_actions", "없음"),
-            llm_data.get("technical_analysis", "없음"),
-            llm_data.get("cells_with_significant_change", "없음"),
-            llm_data.get("action_plan", "없음"),
-            llm_data.get("key_findings", "없음"),
-            llm_data.get("model_name", "없음")
+            "있음" if llm_data.get("executive_summary") else "없음",
+            "있음" if llm_data.get("diagnostic_findings") else "없음",
+            "있음" if llm_data.get("recommended_actions") else "없음"
         )
         
-        # 전체 LLM 데이터 구조를 JSON으로 로깅 (개발용)
-        if isinstance(llm_data, dict) and llm_data:
-            import json
-            logger.debug("🔍 LLM 전체 응답 구조 (JSON):\n%s", json.dumps(llm_data, indent=2, ensure_ascii=False, default=str))
-        
-        # Enhanced 프롬프트 구조만 사용 (기존 호환성 필드 제거)
+        # Enhanced 프롬프트 구조 그대로 추출
         executive_summary = llm_data.get("executive_summary")
         diagnostic_findings = llm_data.get("diagnostic_findings", [])
         recommended_actions = llm_data.get("recommended_actions", [])
         
-        # model_name만 유지 (LLM 서비스에서 추가하는 메타데이터)
+        # 추가 분석 필드 추출 (심도 있는 분석용)
+        technical_analysis = llm_data.get("technical_analysis")
+        cells_with_significant_change = llm_data.get("cells_with_significant_change", [])
+        action_plan = llm_data.get("action_plan")
+        key_findings = llm_data.get("key_findings", [])
+        
+        # 메타데이터 추출
+        confidence = llm_data.get("confidence")
         model_name = (
             llm_data.get("model_name") or
             llm_data.get("model") or
-            llm_data.get("model_used") or
-            llm_data.get("_analysis_metadata", {}).get("strategy_used")
+            llm_data.get("model_used")
         )
         
-        # technical_analysis 전체 구조 추출
-        technical_analysis = llm_data.get("technical_analysis", {})
-        
-        # cells_with_significant_change 추출
-        cells_with_significant_change = llm_data.get("cells_with_significant_change", {})
-        
-        # action_plan 추출 (우선순위별 액션 플랜)
-        action_plan = llm_data.get("action_plan", [])
-        
-        # key_findings 추출 (핵심 발견사항)
-        key_findings = llm_data.get("key_findings", [])
-        
+        # Enhanced 프롬프트 구조 + 추가 분석 필드
         result = {
-            # Enhanced 프롬프트 구조만 사용
+            # Enhanced 프롬프트 필수 필드
             "executive_summary": executive_summary,
             "diagnostic_findings": diagnostic_findings,
             "recommended_actions": recommended_actions,
-            # Enhanced 프롬프트의 추가 필드들
+            
+            # 추가 분석 필드 (Optional)
             "technical_analysis": technical_analysis,
             "cells_with_significant_change": cells_with_significant_change,
             "action_plan": action_plan,
             "key_findings": key_findings,
+            
             # 메타데이터
+            "confidence": confidence,
             "model_name": model_name
         }
         
-        # 디버그 로깅: 추출된 결과 확인 (Enhanced 프롬프트 필드만)
+        # 디버그 로깅: 추출된 결과 확인
         logger.debug(
-            "✅ LLM 분석 추출 결과 (Enhanced 프롬프트):\n"
+            "✅ LLM 분석 추출 완료 (Enhanced 프롬프트 구조 + 추가 필드):\n"
             "  executive_summary: %s\n"
             "  diagnostic_findings: %d개\n"
             "  recommended_actions: %d개\n"
             "  technical_analysis: %s\n"
-            "  cells_with_significant_change: %d개\n"
-            "  action_plan: %d개\n"
-            "  key_findings: %d개\n"
+            "  cells_with_significant_change: %s\n"
+            "  action_plan: %s\n"
+            "  key_findings: %s\n"
+            "  confidence: %s\n"
             "  model_name: %s",
             "있음" if result["executive_summary"] else "없음",
             len(result["diagnostic_findings"]) if isinstance(result["diagnostic_findings"], list) else 0,
             len(result["recommended_actions"]) if isinstance(result["recommended_actions"], list) else 0,
             "있음" if result["technical_analysis"] else "없음",
-            len(result["cells_with_significant_change"]) if isinstance(result["cells_with_significant_change"], dict) else 0,
-            len(result["action_plan"]) if isinstance(result["action_plan"], list) else 0,
-            len(result["key_findings"]) if isinstance(result["key_findings"], list) else 0,
+            f"{len(result['cells_with_significant_change'])}개" if result["cells_with_significant_change"] else "없음",
+            "있음" if result["action_plan"] else "없음",
+            f"{len(result['key_findings'])}개" if result["key_findings"] else "없음",
+            result["confidence"],
             result["model_name"]
         )
         
