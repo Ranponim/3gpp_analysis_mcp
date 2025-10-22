@@ -121,6 +121,10 @@ import json  # JSON 데이터 직렬화/역직렬화
 import logging  # 로깅 시스템
 import math  # 수학 연산 (토큰 추정, NaN 처리 등)
 
+# 커스텀 로깅 레벨 (DEBUG2) 설정
+from config.logging_config import setup_custom_logging_levels, log_data_flow, log_step
+setup_custom_logging_levels()
+
 # ===========================================
 # 표준 라이브러리 imports
 # ===========================================
@@ -753,6 +757,10 @@ class MCPHandler:
         
         self.logger.info("_post_to_backend() 호출: url=%s", backend_url)
         
+        # DEBUG2: 백엔드 전송 전 페이로드 구조 로그
+        log_step(self.logger, "백엔드 API 요청 준비", f"URL: {backend_url}")
+        log_data_flow(self.logger, "백엔드 전송 전 Payload", payload)
+        
         try:
             settings = get_settings()
             timeout = settings.backend_timeout
@@ -762,6 +770,9 @@ class MCPHandler:
             payload = self._convert_numpy_types(payload)
             self.logger.debug("numpy 타입 변환 완료")
             
+            # DEBUG2: 타입 변환 후 페이로드
+            log_data_flow(self.logger, "타입 변환 후 Payload", payload)
+            
             # 헤더 구성
             headers = {
                 "Content-Type": "application/json",
@@ -769,6 +780,7 @@ class MCPHandler:
             }
             
             # POST 요청 전송
+            log_step(self.logger, "백엔드 POST 요청 전송", f"timeout={timeout}s")
             start_time = time.time()
             response = requests.post(
                 backend_url,
@@ -788,6 +800,9 @@ class MCPHandler:
                 elapsed,
                 list(result.keys()) if isinstance(result, dict) else type(result).__name__
             )
+            
+            # DEBUG2: 백엔드 응답 데이터
+            log_data_flow(self.logger, "백엔드 응답 데이터", result)
             
             return result
             
@@ -943,11 +958,15 @@ class MCPHandler:
         try:
             # [MCP-1] 기본 요청 검증
             self.logger.info("[MCP-1] 기본 요청 검증")
+            log_step(self.logger, "[단계 1] 요청 검증 시작")
+            log_data_flow(self.logger, "원본 MCP 요청", request)
             self._validate_basic_request(request)
             
             # [MCP-2] 요청 형식 변환
             self.logger.info("[MCP-2] 요청 형식 변환")
+            log_step(self.logger, "[단계 2] 요청 형식 변환")
             analysis_request = self._parse_request_to_analysis_format(request)
+            log_data_flow(self.logger, "변환된 분석 요청", analysis_request)
             self.logger.debug(
                 "AnalysisService 전달용 요청 요약: %s",
                 {
@@ -968,6 +987,7 @@ class MCPHandler:
             
             # [MCP-4] 분석 실행
             self.logger.info("[MCP-4] 분석 실행 (AnalysisService 위임)")
+            log_step(self.logger, "[단계 3] 분석 실행 시작", f"table={analysis_request.get('table')}")
             self.logger.debug(
                 "AnalysisService.perform_analysis 호출 준비 | backend_url=%s | table=%s | columns=%s",
                 analysis_request.get('backend_url'),
@@ -975,6 +995,7 @@ class MCPHandler:
                 analysis_request.get('columns'),
             )
             analysis_result = self.analysis_service.perform_analysis(analysis_request)
+            log_data_flow(self.logger, "분석 결과 (AnalysisService 반환)", analysis_result)
             self.logger.debug(
                 "AnalysisService 수행 완료: status=%s, keys=%s",
                 analysis_result.get('status') if isinstance(analysis_result, dict) else None,
@@ -1028,7 +1049,9 @@ class MCPHandler:
             
             # [MCP-5] 응답 형식 변환
             self.logger.info("[MCP-5] MCP 응답 형식 변환")
+            log_step(self.logger, "[단계 4] 최종 응답 변환")
             mcp_response = self._format_response_for_mcp(analysis_result)
+            log_data_flow(self.logger, "최종 MCP 응답", mcp_response)
             
             self.logger.info("=" * 20 + " MCP Handler 요청 처리 완료 " + "=" * 20)
             return mcp_response

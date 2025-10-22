@@ -520,8 +520,12 @@ class PEGProcessingService:
         # --- [수정 완료] ---
 
         try:
+            # DEBUG2 로깅 유틸리티 import
+            from config.logging_config import log_step, log_data_flow
+            
             # 1단계: 시간 범위 검증
             logger.info("1단계: 시간 범위 검증")
+            log_step(logger, "[PEG 처리 단계 1] 시간 범위 검증")
             self._validate_time_ranges(time_ranges)
             logger.debug(
                 "시간 범위 요약: N-1=%s~%s, N=%s~%s",
@@ -533,18 +537,24 @@ class PEGProcessingService:
 
             # 2단계: 원시 데이터 조회
             logger.info("2단계: 원시 데이터 조회")
+            log_step(logger, "[PEG 처리 단계 2] DB 원시 데이터 조회", f"table={table_config.get('table')}")
             n1_df, n_df = self._retrieve_raw_peg_data(time_ranges, table_config, filters, peg_filter=db_filter)
+            log_data_flow(logger, "조회된 N-1 데이터", {"shape": n1_df.shape, "columns": list(n1_df.columns), "sample": n1_df.head(3).to_dict() if len(n1_df) > 0 else {}})
+            log_data_flow(logger, "조회된 N 데이터", {"shape": n_df.shape, "columns": list(n_df.columns), "sample": n_df.head(3).to_dict() if len(n_df) > 0 else {}})
             logger.debug(
                 "원시 데이터 조회 결과: N-1 rows=%d, N rows=%d", len(n1_df), len(n_df)
             )
 
             # 3단계: 원시 데이터 검증
             logger.info("3단계: 원시 데이터 검증")
+            log_step(logger, "[PEG 처리 단계 3] 원시 데이터 검증")
             self._validate_raw_data(n1_df, n_df)
 
             # 4단계: PEGCalculator 및 파생 PEG 처리
             logger.info("4단계: PEGCalculator 및 파생 PEG 처리")
+            log_step(logger, "[PEG 처리 단계 4] 데이터 변환 및 계산", f"파생PEG={len(derived_pegs)}개")
             processed_df = self._process_with_calculator(n1_df, n_df, peg_config or {}, filters, derived_pegs=derived_pegs)
+            log_data_flow(logger, "변환된 PEG 데이터", {"shape": processed_df.shape, "columns": list(processed_df.columns), "sample": processed_df.head(3).to_dict() if len(processed_df) > 0 else {}})
             logger.debug(
                 "PEGCalculator 처리 결과: 행수=%d, 컬럼=%s",
                 len(processed_df),

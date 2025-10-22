@@ -39,15 +39,7 @@ class AppConfig(BaseModel):
     version: str = Field(default="1.0.0", description="애플리케이션 버전")
     environment: str = Field(default="development", description="실행 환경 (development, production, testing)")
     debug: bool = Field(default=True, description="디버그 모드 활성화")
-    log_level: str = Field(default="INFO", description="로깅 레벨")
-    
-    @validator('log_level')
-    def validate_log_level(cls, v):
-        """로깅 레벨 검증"""
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-        if v.upper() not in valid_levels:
-            raise ValueError(f"log_level must be one of {valid_levels}")
-        return v.upper()
+    # log_level은 Settings 클래스에서 통합 관리
     
     @validator('environment')
     def validate_environment(cls, v):
@@ -239,7 +231,7 @@ class Settings(BaseSettings):
     app_version: str = Field(default="1.0.0", env="APP_VERSION")
     app_environment: str = Field(default="development", env="APP_ENVIRONMENT")
     app_debug: bool = Field(default=True, env="APP_DEBUG")
-    app_log_level: str = Field(default="INFO", env="APP_LOG_LEVEL")
+    # app_log_level 제거: log_level로 통합 관리
     
     # 데이터베이스 설정
     db_host: str = Field(..., env="DB_HOST")
@@ -292,10 +284,10 @@ class Settings(BaseSettings):
     log_file_path: str = Field(default="logs/app.log", env="LOG_FILE_PATH")
     
     # 검증 메서드들
-    @validator('app_log_level', 'log_level')
+    @validator('log_level')
     def validate_log_level(cls, v):
-        """로깅 레벨 검증"""
-        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        """로깅 레벨 검증 (커스텀 DEBUG2 레벨 포함)"""
+        valid_levels = ['DEBUG2', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v.upper() not in valid_levels:
             raise ValueError(f"log_level must be one of {valid_levels}")
         return v.upper()
@@ -449,9 +441,13 @@ class Settings(BaseSettings):
         return self.app_environment == 'development'
     
     def setup_logging(self) -> None:
-        """로깅 설정 적용"""
+        """로깅 설정 적용 (커스텀 DEBUG2 레벨 지원)"""
+        # 커스텀 로그 레벨 설정 (DEBUG2 추가)
+        from config.logging_config import setup_custom_logging_levels, get_numeric_log_level
+        setup_custom_logging_levels()
+        
         # 기본 로깅 설정
-        log_level = getattr(logging, self.log_level.upper())
+        log_level = get_numeric_log_level(self.log_level)
         logging.basicConfig(
             level=log_level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"

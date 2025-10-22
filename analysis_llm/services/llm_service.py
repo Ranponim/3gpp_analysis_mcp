@@ -392,8 +392,13 @@ class LLMAnalysisService:
         strategy = self.prompt_strategies[analysis_type]
 
         try:
+            # DEBUG2 로깅 유틸리티 import
+            from config.logging_config import log_step, log_data_flow
+            
             # 프롬프트 생성
+            log_step(logger, "[LLM 단계 1] 프롬프트 생성 시작", f"전략={strategy.get_strategy_name()}")
             prompt = strategy.build_prompt(processed_df, n1_range, n_range, **kwargs)
+            log_data_flow(logger, "생성된 프롬프트", {"prompt": prompt, "length": len(prompt)})
 
             # 프롬프트 검증
             if not self.llm_repository.validate_prompt(prompt):
@@ -402,11 +407,15 @@ class LLMAnalysisService:
 
             # LLM 분석 실행
             logger.info("LLM 분석 시작: 전략=%s, 프롬프트=%d자", strategy.get_strategy_name(), len(prompt))
+            log_step(logger, "[LLM 단계 2] LLM API 호출 시작", f"모킹={enable_mock}")
 
             analysis_result = self.llm_repository.analyze_data(prompt, enable_mock=enable_mock)
+            log_data_flow(logger, "LLM 원본 응답", analysis_result)
 
             # 응답 후처리
+            log_step(logger, "[LLM 단계 3] 응답 후처리 시작")
             processed_result = self._post_process_analysis_result(analysis_result, analysis_type, processed_df)
+            log_data_flow(logger, "후처리된 LLM 결과", processed_result)
 
             logger.info("LLM 분석 완료: 전략=%s, 결과키=%d개", strategy.get_strategy_name(), len(processed_result))
 
