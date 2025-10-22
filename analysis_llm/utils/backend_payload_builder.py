@@ -390,11 +390,26 @@ class BackendPayloadBuilder:
         diagnostic_findings = llm_data.get("diagnostic_findings", [])
         recommended_actions = llm_data.get("recommended_actions", [])
         
-        # 추가 분석 필드 추출 (심도 있는 분석용)
+        # 추가 분석 필드 추출 (심도 있는 분석용) - 타입 정규화
         technical_analysis = llm_data.get("technical_analysis")
+        # 빈 객체 {}인 경우 None으로 변환
+        if isinstance(technical_analysis, dict) and not technical_analysis:
+            technical_analysis = None
+        
         cells_with_significant_change = llm_data.get("cells_with_significant_change", [])
+        # 빈 객체 {}인 경우 빈 배열로 변환
+        if isinstance(cells_with_significant_change, dict):
+            cells_with_significant_change = []
+        
         action_plan = llm_data.get("action_plan")
+        # 빈 배열 []인 경우 None으로 변환
+        if isinstance(action_plan, list):
+            action_plan = None
+        
         key_findings = llm_data.get("key_findings", [])
+        # 빈 객체 {}인 경우 빈 배열로 변환
+        if isinstance(key_findings, dict):
+            key_findings = []
         
         # 메타데이터 추출
         confidence = llm_data.get("confidence")
@@ -422,27 +437,36 @@ class BackendPayloadBuilder:
             "model_name": model_name
         }
         
-        # 디버그 로깅: 추출된 결과 확인
+        # 디버그 로깅: 추출된 결과 확인 (타입 정규화 후)
         logger.debug(
-            "✅ LLM 분석 추출 완료 (Enhanced 프롬프트 구조 + 추가 필드):\n"
-            "  executive_summary: %s\n"
-            "  diagnostic_findings: %d개\n"
-            "  recommended_actions: %d개\n"
-            "  technical_analysis: %s\n"
-            "  cells_with_significant_change: %s\n"
-            "  action_plan: %s\n"
-            "  key_findings: %s\n"
-            "  confidence: %s\n"
-            "  model_name: %s",
+            "✅ LLM 분석 추출 완료 (Enhanced 프롬프트 구조 + 추가 필드 - 타입 정규화):\n"
+            "  executive_summary: %s (type: %s)\n"
+            "  diagnostic_findings: %d개 (type: %s)\n"
+            "  recommended_actions: %d개 (type: %s)\n"
+            "  technical_analysis: %s (type: %s)\n"
+            "  cells_with_significant_change: %s (type: %s)\n"
+            "  action_plan: %s (type: %s)\n"
+            "  key_findings: %s (type: %s)\n"
+            "  confidence: %s (type: %s)\n"
+            "  model_name: %s (type: %s)",
             "있음" if result["executive_summary"] else "없음",
+            type(result["executive_summary"]).__name__,
             len(result["diagnostic_findings"]) if isinstance(result["diagnostic_findings"], list) else 0,
+            type(result["diagnostic_findings"]).__name__,
             len(result["recommended_actions"]) if isinstance(result["recommended_actions"], list) else 0,
+            type(result["recommended_actions"]).__name__,
             "있음" if result["technical_analysis"] else "없음",
+            type(result["technical_analysis"]).__name__,
             f"{len(result['cells_with_significant_change'])}개" if result["cells_with_significant_change"] else "없음",
+            type(result["cells_with_significant_change"]).__name__,
             "있음" if result["action_plan"] else "없음",
+            type(result["action_plan"]).__name__,
             f"{len(result['key_findings'])}개" if result["key_findings"] else "없음",
+            type(result["key_findings"]).__name__,
             result["confidence"],
-            result["model_name"]
+            type(result["confidence"]).__name__,
+            result["model_name"],
+            type(result["model_name"]).__name__
         )
         
         return result
