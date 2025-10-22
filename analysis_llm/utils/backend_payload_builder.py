@@ -170,6 +170,45 @@ class BackendPayloadBuilder:
             len(peg_comparisons)
         )
         
+        # 🔍 422 에러 디버깅: 전체 페이로드 구조 로깅
+        logger.debug("🔍 [422 디버깅] 생성된 페이로드 구조:")
+        logger.debug("  - ne_id: %s (type: %s)", payload.get("ne_id"), type(payload.get("ne_id")).__name__)
+        logger.debug("  - cell_id: %s (type: %s)", payload.get("cell_id"), type(payload.get("cell_id")).__name__)
+        logger.debug("  - swname: %s (type: %s)", payload.get("swname"), type(payload.get("swname")).__name__)
+        logger.debug("  - rel_ver: %s (type: %s)", payload.get("rel_ver"), type(payload.get("rel_ver")).__name__)
+        logger.debug("  - analysis_period: %s", payload.get("analysis_period"))
+        logger.debug("  - choi_result: %s", payload.get("choi_result"))
+        logger.debug("  - analysis_id: %s (type: %s)", payload.get("analysis_id"), type(payload.get("analysis_id")).__name__)
+        
+        # LLM 분석 상세 구조 로깅
+        llm_analysis_data = payload.get("llm_analysis", {})
+        logger.debug("  - llm_analysis keys: %s", list(llm_analysis_data.keys()) if isinstance(llm_analysis_data, dict) else "Not a dict")
+        logger.debug("  - llm_analysis type: %s", type(llm_analysis_data).__name__)
+        
+        if isinstance(llm_analysis_data, dict):
+            # diagnostic_findings 구조 확인
+            diagnostic_findings = llm_analysis_data.get("diagnostic_findings", [])
+            logger.debug("  - diagnostic_findings: %d개", len(diagnostic_findings) if isinstance(diagnostic_findings, list) else 0)
+            if isinstance(diagnostic_findings, list) and len(diagnostic_findings) > 0:
+                first_finding = diagnostic_findings[0]
+                logger.debug("  - 첫 번째 diagnostic_finding: %s", first_finding)
+                logger.debug("  - 첫 번째 finding keys: %s", list(first_finding.keys()) if isinstance(first_finding, dict) else "Not a dict")
+            
+            # recommended_actions 구조 확인
+            recommended_actions = llm_analysis_data.get("recommended_actions", [])
+            logger.debug("  - recommended_actions: %d개", len(recommended_actions) if isinstance(recommended_actions, list) else 0)
+            if isinstance(recommended_actions, list) and len(recommended_actions) > 0:
+                first_action = recommended_actions[0]
+                logger.debug("  - 첫 번째 recommended_action: %s", first_action)
+                logger.debug("  - 첫 번째 action keys: %s", list(first_action.keys()) if isinstance(first_action, dict) else "Not a dict")
+        
+        # PEG 비교 구조 확인
+        logger.debug("  - peg_comparisons: %d개", len(peg_comparisons))
+        if len(peg_comparisons) > 0:
+            first_peg = peg_comparisons[0]
+            logger.debug("  - 첫 번째 PEG: %s", first_peg)
+            logger.debug("  - 첫 번째 PEG keys: %s", list(first_peg.keys()) if isinstance(first_peg, dict) else "Not a dict")
+        
         return payload
     
     @staticmethod
