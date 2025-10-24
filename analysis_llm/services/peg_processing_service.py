@@ -405,8 +405,31 @@ class PEGProcessingService:
             pivot_df = combined_df.pivot_table(index=index_keys, columns="period", values="value", aggfunc='mean')
 
             if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
+                # N-1=0 & N=0인 PEG 식별 (토큰 최적화용)
+                zero_both_mask = (pivot_df["N-1"] == 0) & (pivot_df["N"] == 0)
+                
+                # 변화율 계산 가능한 PEG 식별 (N-1이 0이 아닌 경우)
                 valid_mask = (pivot_df["N-1"].notna()) & (pivot_df["N"].notna()) & (pivot_df["N-1"] != 0)
+                
+                # 초기화: 모든 change_pct를 NULL로 설정
                 pivot_df["change_pct"] = None
+                
+                # 📊 통계 로깅 (INFO 레벨): 제외된 PEG 개수
+                if zero_both_mask.sum() > 0:
+                    logger.info(
+                        f"📊 토큰 최적화: N-1=0 & N=0인 PEG {zero_both_mask.sum()}개 발견 "
+                        f"→ change_pct=NULL 처리 (프롬프트에서 제외됨, DataFrame에는 유지)"
+                    )
+                    
+                    # 🔍 상세 로깅 (DEBUG2 레벨): 제외된 PEG 이름
+                    from config.logging_config import log_at_debug2
+                    zero_both_pegs = pivot_df[zero_both_mask].index.tolist()
+                    log_at_debug2(
+                        logger,
+                        f"🔍 N-1=0 & N=0 PEG 목록 ({len(zero_both_pegs)}개): {zero_both_pegs}"
+                    )
+                
+                # 정상 케이스: 변화율 계산 (N-1이 0이 아닌 경우만)
                 if valid_mask.sum() > 0:
                     # 변화율 계산 전 음수 값 검증
                     negative_n1_mask = (pivot_df["N-1"] < 0)

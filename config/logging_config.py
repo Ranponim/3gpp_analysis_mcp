@@ -161,6 +161,18 @@ def log_step(logger: logging.Logger, step_name: str, details: Optional[str] = No
         logger.debug2(message)
 
 
+def log_at_debug2(logger: logging.Logger, message: str):
+    """
+    DEBUG2 레벨로 로그를 기록하는 헬퍼 함수
+    
+    Args:
+        logger: 로거 인스턴스
+        message: 로그 메시지
+    """
+    if logger.isEnabledFor(DEBUG2_LEVEL_NUM):
+        logger.debug2(message)
+
+
 # 모듈 로드 시 자동으로 커스텀 레벨 설정
 setup_custom_logging_levels()
 

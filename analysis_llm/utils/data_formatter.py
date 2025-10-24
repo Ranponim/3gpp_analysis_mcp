@@ -16,7 +16,8 @@ def format_dataframe_for_prompt(
     df: pd.DataFrame, 
     preferred_columns: Optional[List[str]] = None,
     max_rows: Optional[int] = None,
-    fallback_column_count: int = 5
+    fallback_column_count: int = 5,
+    exclude_null_change_pct: Optional[bool] = None
 ) -> str:
     """
     DataFrame을 프롬프트에 포함할 수 있는 문자열 형태로 포매팅합니다.
@@ -31,6 +32,8 @@ def format_dataframe_for_prompt(
         max_rows (Optional[int]): 포함할 최대 행 수
             None이면 환경변수 PROMPT_PREVIEW_ROWS 또는 기본값 200 사용
         fallback_column_count (int): preferred_columns가 없을 때 사용할 컬럼 수
+        exclude_null_change_pct (Optional[bool]): change_pct가 NULL인 행 제외 여부
+            None이면 환경변수 PEG_EXCLUDE_ZERO_BOTH_FROM_PROMPT 또는 기본값 True 사용
     
     Returns:
         str: 포매팅된 데이터 문자열 (인덱스 제외)
@@ -59,7 +62,45 @@ def format_dataframe_for_prompt(
         logging.warning("format_dataframe_for_prompt(): 빈 DataFrame 입력")
         raise ValueError("DataFrame이 비어있거나 None입니다")
     
+    original_row_count = len(df)
     logging.info(f"format_dataframe_for_prompt() 호출: DataFrame 크기={df.shape}")
+    
+    # ✅ [토큰 최적화] change_pct가 NULL인 행 필터링 (N-1=0 & N=0 제외)
+    # 환경변수에서 설정 가져오기
+    if exclude_null_change_pct is None:
+        try:
+            from config import get_settings
+            settings = get_settings()
+            exclude_null_change_pct = settings.peg_exclude_zero_both_from_prompt
+        except Exception:
+            # 설정 로드 실패 시 기본값 사용
+            exclude_null_change_pct = True
+            logging.debug("환경변수 로드 실패, 기본값 exclude_null_change_pct=True 사용")
+    
+    if exclude_null_change_pct and 'change_pct' in df.columns:
+        # NULL 아닌 행만 필터링
+        df_filtered = df[df['change_pct'].notna()].copy()
+        excluded_count = original_row_count - len(df_filtered)
+        
+        if excluded_count > 0:
+            # 📊 통계 로깅 (INFO 레벨): 제외된 행 개수
+            logging.info(
+                f"📊 프롬프트 필터링: change_pct=NULL인 {excluded_count}행 제외 "
+                f"(원본: {original_row_count}행 → 필터링 후: {len(df_filtered)}행)"
+            )
+            
+            # 🔍 상세 로깅 (DEBUG2 레벨): 제외된 PEG 이름
+            from config.logging_config import log_at_debug2
+            excluded_pegs = df[df['change_pct'].isna()]['peg_name'].unique().tolist() if 'peg_name' in df.columns else []
+            if excluded_pegs:
+                log_at_debug2(
+                    logging.getLogger(__name__),
+                    f"🔍 프롬프트에서 제외된 PEG 목록 ({len(excluded_pegs)}개): {excluded_pegs}"
+                )
+            
+            df = df_filtered
+        else:
+            logging.debug("필터링 대상 없음 (모든 PEG가 유효한 변화율 보유)")
     
     # 기본 우선 컬럼 설정
     # PEG 분석에 필요한 실제 컬럼명들
@@ -92,7 +133,10 @@ def format_dataframe_for_prompt(
     # 문자열로 변환 (인덱스 제외)
     formatted_string = preview_df.to_string(index=False)
     
-    logging.info(f"format_dataframe_for_prompt() 완료: {len(preview_df)}행, {len(selected_columns)}컬럼 포매팅")
+    logging.info(
+        f"format_dataframe_for_prompt() 완료: {len(preview_df)}행, {len(selected_columns)}컬럼 포매팅 "
+        f"(원본: {original_row_count}행)"
+    )
     
     return formatted_string
 

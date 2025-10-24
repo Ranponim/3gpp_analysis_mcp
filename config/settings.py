@@ -278,6 +278,13 @@ class Settings(BaseSettings):
     # JSONB 파싱 설정
     jsonb_max_recursion_depth: int = Field(default=5, env="JSONB_MAX_RECURSION_DEPTH", description="JSONB 재귀 파싱 최대 깊이")
     
+    # PEG 데이터 필터링 설정 (토큰 최적화)
+    peg_exclude_zero_both_from_prompt: bool = Field(
+        default=True, 
+        env="PEG_EXCLUDE_ZERO_BOTH_FROM_PROMPT", 
+        description="N-1=0 & N=0인 PEG를 프롬프트에서 제외 (데이터는 유지, 토큰 절약)"
+    )
+    
     # 로깅 설정
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_file_enabled: bool = Field(default=False, env="LOG_FILE_ENABLED")
