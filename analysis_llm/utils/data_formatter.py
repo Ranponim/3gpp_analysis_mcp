@@ -121,14 +121,15 @@ def format_dataframe_for_prompt(
     # 컬럼 필터링된 DataFrame 생성
     filtered_df = df[selected_columns]
     
-    # 행 수 제한 적용
-    if max_rows is None:
-        # 환경변수에서 미리보기 행 수 설정 (기본값: 200행)
-        max_rows = int(os.getenv('PROMPT_PREVIEW_ROWS', '200'))
-        logging.info(f"환경변수 PROMPT_PREVIEW_ROWS에서 행 수 제한: {max_rows}")
-    
-    # 행 수 제한 적용
-    preview_df = filtered_df.head(max_rows)
+    # 행 수 제한 적용 (max_rows가 명시적으로 지정된 경우에만 제한)
+    if max_rows is not None and max_rows > 0:
+        # 명시적으로 행 수 제한이 요청된 경우에만 적용
+        preview_df = filtered_df.head(max_rows)
+        logging.info(f"명시적 행 수 제한 적용: {max_rows}행으로 제한")
+    else:
+        # 기본값: 모든 행 포함 (데이터 유실 방지)
+        preview_df = filtered_df
+        logging.info(f"모든 데이터 포함: {len(preview_df)}행 (행 수 제한 없음)")
     
     # 문자열로 변환 (인덱스 제외)
     formatted_string = preview_df.to_string(index=False)

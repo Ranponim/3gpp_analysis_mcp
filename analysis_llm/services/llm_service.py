@@ -174,13 +174,16 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
                 analysis_type=self.get_strategy_name()
             )
 
-        # 데이터 포맷팅
+        # 데이터 포맷팅 - 모든 PEG 포함 (데이터 유실 방지)
         preview_cols = [c for c in processed_df.columns if c in ("peg_name", "avg_value", "period", "change_pct")]
         if not preview_cols:
             preview_cols = list(processed_df.columns)[:6]
 
-        preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
-        preview_df = processed_df[preview_cols].head(preview_rows)
+        # 모든 PEG를 포함하도록 수정 (행 수 제한 제거)
+        # 기존: preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
+        # 기존: preview_df = processed_df[preview_cols].head(preview_rows)
+        preview_df = processed_df[preview_cols]  # 모든 데이터 포함
+        logger.info("프롬프트 데이터 준비: 전체 %d행 포함 (모든 PEG 포함)", len(preview_df))
         data_preview = self.format_dataframe_for_prompt(preview_df)
 
         # YAML 프롬프트 템플릿 사용

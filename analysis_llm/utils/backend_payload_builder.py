@@ -495,7 +495,7 @@ class BackendPayloadBuilder:
             if not peg_name:
                 continue
             
-            # N-1 통계
+            # N-1 통계 (DataProcessor의 AnalyzedPEGResult.to_dict()와 일치)
             n_minus_1_stats = {
                 "avg": item.get("n_minus_1_avg"),
                 "pct_95": item.get("n_minus_1_pct_95"),
@@ -506,9 +506,9 @@ class BackendPayloadBuilder:
                 "std": item.get("n_minus_1_std")
             }
             
-            # N 통계
+            # N 통계 (DataProcessor의 AnalyzedPEGResult.to_dict()와 일치)
             n_stats = {
-                "avg": item.get("n_avg") or item.get("n_value"),
+                "avg": item.get("n_avg"),
                 "pct_95": item.get("n_pct_95"),
                 "pct_99": item.get("n_pct_99"),
                 "min": item.get("n_min"),

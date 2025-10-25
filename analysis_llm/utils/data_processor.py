@@ -34,11 +34,15 @@ class AnalyzedPEGResult:
     분석된 PEG 결과를 나타내는 데이터 모델
 
     ResponseFormatter(작업 19)를 위한 일관된 데이터 구조를 제공합니다.
+    
+    필드명 규칙:
+    - n_minus_1_avg, n_avg: 평균값 (avg는 통계 용어로 명확함)
+    - 향후 확장: n_minus_1_pct_95, n_minus_1_min, n_minus_1_max 등
     """
 
     peg_name: str
-    n_minus_1_value: Optional[float]
-    n_value: Optional[float]
+    n_minus_1_avg: Optional[float]  # 수정: _value → _avg (평균값이므로)
+    n_avg: Optional[float]           # 수정: _value → _avg (평균값이므로)
     absolute_change: Optional[float]
     percentage_change: Optional[float]
     llm_analysis_summary: Optional[str] = None
@@ -47,8 +51,8 @@ class AnalyzedPEGResult:
         """딕셔너리 형태로 변환"""
         return {
             "peg_name": self.peg_name,
-            "n_minus_1_value": self.n_minus_1_value,
-            "n_value": self.n_value,
+            "n_minus_1_avg": self.n_minus_1_avg,  # 수정
+            "n_avg": self.n_avg,                   # 수정
             "absolute_change": self.absolute_change,
             "percentage_change": self.percentage_change,
             "llm_analysis_summary": self.llm_analysis_summary,
@@ -56,7 +60,7 @@ class AnalyzedPEGResult:
 
     def has_complete_data(self) -> bool:
         """완전한 데이터 (N-1, N 모두 존재)인지 확인"""
-        return self.n_minus_1_value is not None and self.n_value is not None
+        return self.n_minus_1_avg is not None and self.n_avg is not None  # 수정
 
     def has_change_data(self) -> bool:
         """변화율 데이터가 있는지 확인"""
@@ -256,16 +260,7 @@ class DataProcessor:
 
             # 중복 데이터 감지 및 로깅 (pivot 실패 방지)
             self.logger.debug("pivot 실행 전 중복 데이터 검사 시작")
-            
-            # dimensions 컬럼이 있으면 포함하여 중복 검사 (cellid 등 고려)
-            if 'dimensions' in processed_df.columns:
-                duplicate_subset = ['peg_name', 'dimensions', 'period', 'avg_value']
-                self.logger.debug("dimensions 컬럼 포함하여 중복 검사: %s", duplicate_subset)
-            else:
-                duplicate_subset = ['peg_name', 'period', 'avg_value']
-                self.logger.debug("dimensions 컬럼 없음, 기본 중복 검사: %s", duplicate_subset)
-            
-            duplicates = processed_df[processed_df.duplicated(subset=duplicate_subset, keep=False)]
+            duplicates = processed_df[processed_df.duplicated(subset=['peg_name', 'period', 'avg_value'], keep=False)]
             
             if not duplicates.empty:
                 unique_peg_count = duplicates['peg_name'].nunique()
@@ -279,8 +274,7 @@ class DataProcessor:
                     for _, row in dup_rows.iterrows():
                         period = row.get('period', 'N/A')
                         avg_value = row.get('avg_value', 'N/A')
-                        dimensions = row.get('dimensions', 'N/A')
-                        self.logger.error(f"       period={period}, avg_value={avg_value}, dimensions={dimensions}")
+                        self.logger.error(f"       period={period}, avg_value={avg_value}")
                 
                 if unique_peg_count > 5:
                     self.logger.error(f"   ... 외 {unique_peg_count - 5}개 PEG 더 있음")
@@ -312,27 +306,27 @@ class DataProcessor:
             results: List[AnalyzedPEGResult] = []
 
             for peg_name, row in pivot_df.iterrows():
-                n_minus_1_value = row.get("n_minus_1")
-                n_value = row.get("n")
+                n_minus_1_avg = row.get("n_minus_1")  # 수정: _value → _avg
+                n_avg = row.get("n")                   # 수정: _value → _avg
 
                 absolute_change: Optional[float] = None
                 percentage_change: Optional[float] = None
 
-                if n_minus_1_value is not None and n_value is not None:
-                    absolute_change = n_value - n_minus_1_value
+                if n_minus_1_avg is not None and n_avg is not None:
+                    absolute_change = n_avg - n_minus_1_avg  # 수정
                     percentage_change = change_map.get(peg_name)
                     if percentage_change is not None and pd.isna(percentage_change):
                         percentage_change = None
                 else:
                     self.logger.warning(
-                        "PEG '%s' 데이터 불완전 (N-1=%s, N=%s)", peg_name, n_minus_1_value, n_value
+                        "PEG '%s' 데이터 불완전 (N-1=%s, N=%s)", peg_name, n_minus_1_avg, n_avg  # 수정
                     )
 
                 results.append(
                     AnalyzedPEGResult(
                         peg_name=peg_name,
-                        n_minus_1_value=n_minus_1_value,
-                        n_value=n_value,
+                        n_minus_1_avg=n_minus_1_avg,  # 수정
+                        n_avg=n_avg,                   # 수정
                         absolute_change=absolute_change,
                         percentage_change=percentage_change,
                     )
@@ -348,11 +342,6 @@ class DataProcessor:
                     for peg_name, summary in peg_insights.items():
                         if isinstance(summary, str) and summary.strip():
                             llm_peg_analysis[peg_name] = summary
-                elif isinstance(llm_analysis_results.get("summary"), str):
-                    summary = llm_analysis_results["summary"]
-                    trimmed = summary[:200] + "..." if len(summary) > 200 else summary
-                    for result in results:
-                        llm_peg_analysis[result.peg_name] = trimmed
 
             final_results = self._integrate_llm_analysis(results, llm_peg_analysis)
 
