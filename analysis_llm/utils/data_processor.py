@@ -256,7 +256,16 @@ class DataProcessor:
 
             # 중복 데이터 감지 및 로깅 (pivot 실패 방지)
             self.logger.debug("pivot 실행 전 중복 데이터 검사 시작")
-            duplicates = processed_df[processed_df.duplicated(subset=['peg_name', 'period', 'avg_value'], keep=False)]
+            
+            # dimensions 컬럼이 있으면 포함하여 중복 검사 (cellid 등 고려)
+            if 'dimensions' in processed_df.columns:
+                duplicate_subset = ['peg_name', 'dimensions', 'period', 'avg_value']
+                self.logger.debug("dimensions 컬럼 포함하여 중복 검사: %s", duplicate_subset)
+            else:
+                duplicate_subset = ['peg_name', 'period', 'avg_value']
+                self.logger.debug("dimensions 컬럼 없음, 기본 중복 검사: %s", duplicate_subset)
+            
+            duplicates = processed_df[processed_df.duplicated(subset=duplicate_subset, keep=False)]
             
             if not duplicates.empty:
                 unique_peg_count = duplicates['peg_name'].nunique()
@@ -270,7 +279,8 @@ class DataProcessor:
                     for _, row in dup_rows.iterrows():
                         period = row.get('period', 'N/A')
                         avg_value = row.get('avg_value', 'N/A')
-                        self.logger.error(f"       period={period}, avg_value={avg_value}")
+                        dimensions = row.get('dimensions', 'N/A')
+                        self.logger.error(f"       period={period}, avg_value={avg_value}, dimensions={dimensions}")
                 
                 if unique_peg_count > 5:
                     self.logger.error(f"   ... 외 {unique_peg_count - 5}개 PEG 더 있음")

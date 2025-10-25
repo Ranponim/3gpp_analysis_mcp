@@ -511,10 +511,12 @@ class AnalysisService:
                     request_context = {
                         "peg_filter_file": request.get("peg_filter_file")
                     }
+                    filters_dict = request.get("filters", {})
+                    logger.info("전달되는 filters 딕셔너리: %s", filters_dict)
                     processed_df = self.peg_processing_service.process_peg_data(
                         time_ranges=time_ranges,
                         table_config=table_config,
-                        filters=request.get("filters", {}),
+                        filters=filters_dict,
                         peg_config=peg_config,
                         request_context=request_context,
                     )

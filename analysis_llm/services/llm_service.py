@@ -137,6 +137,43 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         if not self.validate_input_data(processed_df):
             raise LLMAnalysisError("입력 데이터가 유효하지 않습니다", analysis_type=self.get_strategy_name())
 
+        # 🔍 토큰 최적화: change_pct가 NULL인 PEG들을 프롬프트에서 제외
+        original_peg_count = len(processed_df["peg_name"].unique())
+        
+        if "change_pct" in processed_df.columns:
+            # change_pct가 NULL이 아닌 행들만 필터링
+            filtered_df = processed_df[pd.notna(processed_df["change_pct"])].copy()
+            filtered_peg_count = len(filtered_df["peg_name"].unique())
+            excluded_peg_count = original_peg_count - filtered_peg_count
+            
+            if excluded_peg_count > 0:
+                logger.info(
+                    f"🔍 토큰 최적화: change_pct=NULL인 PEG {excluded_peg_count}개 제외 "
+                    f"(전체 {original_peg_count}개 → 프롬프트 {filtered_peg_count}개)"
+                )
+                
+                # 제외된 PEG 이름들 상세 로깅 (DEBUG2 레벨)
+                from config.logging_config import log_at_debug2
+                excluded_pegs = set(processed_df["peg_name"].unique()) - set(filtered_df["peg_name"].unique())
+                log_at_debug2(
+                    logger,
+                    f"🔍 프롬프트에서 제외된 PEG 목록 ({len(excluded_pegs)}개): {sorted(list(excluded_pegs))}"
+                )
+                
+                # 필터링된 데이터 사용
+                processed_df = filtered_df
+            else:
+                logger.info("🔍 토큰 최적화: 제외할 PEG 없음 (모든 PEG의 change_pct가 유효함)")
+        else:
+            logger.warning("🔍 토큰 최적화: change_pct 컬럼이 없어 필터링을 수행할 수 없습니다")
+
+        # 필터링 후 데이터가 비어있는지 확인
+        if processed_df.empty:
+            raise LLMAnalysisError(
+                "필터링 후 분석할 PEG 데이터가 없습니다. 모든 PEG의 change_pct가 NULL일 수 있습니다.",
+                analysis_type=self.get_strategy_name()
+            )
+
         # 데이터 포맷팅
         preview_cols = [c for c in processed_df.columns if c in ("peg_name", "avg_value", "period", "change_pct")]
         if not preview_cols:
