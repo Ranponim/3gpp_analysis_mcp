@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from collections import defaultdict
 
 import pandas as pd
@@ -405,11 +405,13 @@ class PEGProcessingService:
             pivot_df = combined_df.pivot_table(index=index_keys, columns="period", values="value", aggfunc='mean')
 
             if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
-                # N-1=0 & N=0인 PEG 식별 (토큰 최적화용)
+                # 다양한 케이스별 마스크 정의
                 zero_both_mask = (pivot_df["N-1"] == 0) & (pivot_df["N"] == 0)
+                zero_to_nonzero_mask = (pivot_df["N-1"] == 0) & (pivot_df["N"] != 0)
+                nonzero_to_zero_mask = (pivot_df["N-1"] != 0) & (pivot_df["N"] == 0)
                 
-                # 변화율 계산 가능한 PEG 식별 (N-1이 0이 아닌 경우)
-                valid_mask = (pivot_df["N-1"].notna()) & (pivot_df["N"].notna()) & (pivot_df["N-1"] != 0)
+                # 변화율 계산 가능한 PEG 식별 (N-1이 0이 아니고 N도 0이 아닌 경우)
+                valid_mask = (pivot_df["N-1"].notna()) & (pivot_df["N"].notna()) & (pivot_df["N-1"] != 0) & (pivot_df["N"] != 0)
                 
                 # 초기화: 모든 change_pct를 NULL로 설정
                 pivot_df["change_pct"] = None
@@ -428,6 +430,50 @@ class PEGProcessingService:
                         logger,
                         f"🔍 N-1=0 & N=0 PEG 목록 ({len(zero_both_pegs)}개): {zero_both_pegs}"
                     )
+                
+                # ⚠️ N-1=0 → N≠0 케이스: 급증 현상 감지
+                if zero_to_nonzero_mask.sum() > 0:
+                    logger.warning(
+                        f"⚠️ 급증 패턴 감지: N-1=0에서 N≠0으로 증가한 PEG {zero_to_nonzero_mask.sum()}개 "
+                        f"→ change_pct='WARN N-1=0,N!=0'로 설정하여 LLM에 경고 전달"
+                    )
+                    # 특별 값으로 표시 (LLM이 인식 가능하도록)
+                    pivot_df.loc[zero_to_nonzero_mask, "change_pct"] = "WARN N-1=0,N!=0"
+                    
+                    # 🔍 상세 로깅
+                    from config.logging_config import log_at_debug2
+                    emergence_pegs = pivot_df[zero_to_nonzero_mask].index.tolist()
+                    log_at_debug2(
+                        logger,
+                        f"🔍 급증 PEG 목록 ({len(emergence_pegs)}개): {emergence_pegs}"
+                    )
+                    for peg_name, row in pivot_df[zero_to_nonzero_mask].iterrows():
+                        log_at_debug2(
+                            logger,
+                            f"   PEG: {peg_name}, N-1: {row['N-1']}, N: {row['N']}"
+                        )
+                
+                # ⚠️ N-1≠0 → N=0 케이스: 급감 현상 감지
+                if nonzero_to_zero_mask.sum() > 0:
+                    logger.warning(
+                        f"⚠️ 급감 패턴 감지: N-1≠0에서 N=0으로 감소한 PEG {nonzero_to_zero_mask.sum()}개 "
+                        f"→ change_pct='WARN N-1!=0,N=0'로 설정하여 LLM에 경고 전달"
+                    )
+                    # 특별 값으로 표시
+                    pivot_df.loc[nonzero_to_zero_mask, "change_pct"] = "WARN N-1!=0,N=0"
+                    
+                    # 🔍 상세 로깅
+                    from config.logging_config import log_at_debug2
+                    zero_decrease_pegs = pivot_df[nonzero_to_zero_mask].index.tolist()
+                    log_at_debug2(
+                        logger,
+                        f"🔍 급감 PEG 목록 ({len(zero_decrease_pegs)}개): {zero_decrease_pegs}"
+                    )
+                    for peg_name, row in pivot_df[nonzero_to_zero_mask].iterrows():
+                        log_at_debug2(
+                            logger,
+                            f"   PEG: {peg_name}, N-1: {row['N-1']}, N: {row['N']}"
+                        )
                 
                 # 정상 케이스: 변화율 계산 (N-1이 0이 아닌 경우만)
                 if valid_mask.sum() > 0:

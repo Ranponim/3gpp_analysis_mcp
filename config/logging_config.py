@@ -21,14 +21,29 @@ Usage:
     # 사용
     logger = logging.getLogger(__name__)
     logger.debug2("DB 조회 결과: %s", data)
+
+환경변수:
+- LOG_MAX_LENGTH: 로그 출력 최대 길이 (기본값: 1000)
+    프롬프트 등 긴 데이터를 로그에 출력할 때 최대 길이를 제한합니다.
+    매우 긴 내용을 로그에 남기고 싶다면 이 값을 크게 설정하세요.
 """
 
 import logging
+import os
 from typing import Optional
 
 # 커스텀 로그 레벨 상수
 DEBUG2_LEVEL_NUM = 5
 DEBUG2_LEVEL_NAME = 'DEBUG2'
+
+def _get_log_max_length() -> int:
+    """
+    로그 최대 길이를 환경변수에서 읽어 반환 (동적 읽기)
+    
+    Returns:
+        int: LOG_MAX_LENGTH 환경변수 값 (기본값: 1000)
+    """
+    return int(os.getenv('LOG_MAX_LENGTH', '1000'))
 
 
 def setup_custom_logging_levels():
@@ -95,19 +110,30 @@ def get_numeric_log_level(level: str) -> int:
         raise ValueError(f"Invalid log level: {level}. Must be one of {valid_levels}")
 
 
-def format_data_for_log(data, max_length: int = 1000, indent: int = 2) -> str:
+def format_data_for_log(data, max_length: Optional[int] = None, indent: int = 2) -> str:
     """
     로그 출력을 위해 데이터를 보기 좋게 포맷팅합니다.
     
     Args:
         data: 포맷팅할 데이터 (dict, list, str 등)
-        max_length: 최대 출력 길이 (너무 긴 경우 잘라냄)
+        max_length: 최대 출력 길이 (None이면 환경변수 사용, 너무 긴 경우 잘라냄)
         indent: JSON 들여쓰기 수준
         
     Returns:
         str: 포맷팅된 문자열
+        
+    환경변수:
+        LOG_MAX_LENGTH: 로그 출력 최대 길이 (기본값: 1000)
     """
     import json
+    
+    # max_length가 None이면 환경변수 값 사용
+    if max_length is None:
+        max_length = _get_log_max_length()
+    
+    # indent가 None이면 기본값 2 사용
+    if indent is None:
+        indent = 2
     
     try:
         # 딕셔너리나 리스트인 경우 JSON으로 포맷
@@ -117,7 +143,7 @@ def format_data_for_log(data, max_length: int = 1000, indent: int = 2) -> str:
             formatted = str(data)
         
         # 길이 제한
-        if len(formatted) > max_length:
+        if max_length > 0 and len(formatted) > max_length:
             return formatted[:max_length] + f"\n... (총 {len(formatted)}자, {max_length}자까지만 표시)"
         
         return formatted

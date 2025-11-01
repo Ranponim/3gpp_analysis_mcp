@@ -32,10 +32,9 @@ prompts:
     - 기간 n-1: {n1_range}
     - 기간 n: {n_range}
     - 핵심 가정: 두 기간은 동일한 시험환경(동일 하드웨어, 기본 파라미터, 트래픽 모델)에서 수행되었습니다.
-    - 입력 데이터는 PEG 단위로 집계된 평균값이며, 개별 셀(cell) 데이터는 포함되어 있지 않습니다. 따라서 셀 단위의 특정 문제 식별은 불가능하며, 집계 데이터 기반의 거시적 분석을 수행해야 합니다.
 
     [입력 데이터]
-    - 컬럼 설명: peg_name(PEG 이름), avg_n_minus_1(기간 n-1 평균), avg_n(기간 n 평균), diff(변화량), pct_change(변화율)
+    - 컬럼 설명: peg_name(PEG 이름), cellid(셀 ID, 집계되지 않은 경우 해당 셀 식별자), avg_value(집계된 평균값), period(기간: N-1 또는 N), change_pct(변화율 %)
     - 데이터 테이블:
     {data_preview}
 
@@ -43,7 +42,13 @@ prompts:
     아래의 4단계 연쇄적 사고(Chain-of-Thought) 진단 워크플로우를 엄격히 따라서 분석을 수행하십시오.
 
     # [LLM-1] 문제 분류 및 중요도 평가 (Triage and Significance Assessment)
-    먼저, 입력 테이블의 모든 PEG를 검토하여 가장 심각한 '부정적' 변화를 보인 상위 3~5개의 PEG를 식별하십시오. '중요도'는 'pct_change'의 절대값 크기와 해당 PEG의 운영상 '고객 영향도'를 종합하여 판단합니다. 각 PEG가 영향을 미치는 3GPP 서비스 범주(Accessibility, Retainability, Mobility, Integrity, Latency)에 따라 영향도를 분류하고, 가장 시급하게 다루어야 할 문제를 선정하십시오.
+    먼저, 입력 테이블의 모든 PEG를 검토하여 가장 심각한 '부정적' 변화를 보인 상위 3~5개의 PEG를 식별하십시오. '중요도'는 'change_pct'의 절대값 크기와 해당 PEG의 운영상 '고객 영향도'를 종합하여 판단합니다. 각 PEG가 영향을 미치는 3GPP 서비스 범주(Accessibility, Retainability, Mobility, Integrity, Latency)에 따라 영향도를 분류하고, 가장 시급하게 다루어야 할 문제를 선정하십시오.
+
+    **특별 주의: change_pct가 "WARN N-1=0,N!=0"인 경우:**
+    이는 PEG가 N-1 기간에는 0이었지만 N 기간에 갑자기 증가한 급증 현상입니다. 이 경우, 다른 PEG의 급증 패턴과 연관성을 반드시 분석하여 어떤 다른 PEG의 변화가 이 PEG에 영향을 주었는지, 또는 어떤 이벤트가 동시에 여러 PEG를 급증시켰는지 논리적으로 추론하십시오.
+
+    **특별 주의: change_pct가 "WARN N-1!=0,N=0"인 경우:**
+    이는 PEG가 N-1 기간에는 값이 있었지만 N 기간에 0으로 감소한 급감 현상입니다. 이 경우, 다른 PEG의 급증이나 급감 패턴과 연관성을 반드시 분석하여 어떤 다른 PEG의 변화가 이 PEG를 0으로 만들었는지, 또는 시스템 설정이나 파라미터 변경이 영향을 주었는지 논리적으로 추론하십시오.
 
     # [LLM-2] 주제별 그룹화 및 핵심 가설 생성 (Thematic Grouping and Primary Hypothesis Generation)
     [LLM-1]에서 식별된 우선순위가 높은 문제들에 대해, 연관된 PEG들을 논리적으로 그룹화하여 '진단 주제(Diagnostic Theme)'를 정의하십시오. (예: 다수의 접속 관련 PEG 악화 -> 'Accessibility Degradation' 주제). 각 주제에 대해, 3GPP 호 처리 절차(Call Flow) 및 운영 경험에 기반하여 가장 개연성 높은 단일 '핵심 가설(Primary Hypothesis)'을 수립하십시오. 이 가설은 구체적이고 검증 가능해야 합니다.
@@ -53,6 +58,14 @@ prompts:
 
     # [LLM-4] 증거 기반의 검증 계획 수립 (Formulation of an Evidence-Based Verification Plan)
     각 핵심 가설에 대해, 현장 엔지니어가 즉시 수행할 수 있는 구체적이고 우선순위가 부여된 '검증 계획'을 수립하십시오. 조치는 반드시 구체적이어야 합니다. (예: '로그 확인' 대신 '특정 카운터(pmRachAtt) 추이 분석'). 조치별로 P1(즉시 조치), P2(심층 조사), P3(정기 감사)와 같은 우선순위를 부여하고, 필요한 데이터(카운터, 파라미터 등)나 도구를 명시하십시오.
+
+    # [LLM-5] PEG별 인사이트 제공 (PEG-Specific Insights)
+    입력 데이터 테이블에서 **WARN 케이스만** 식별하여 해당 PEG들의 인사이트를 제공하십시오. WARN 케이스가 아닌 PEG는 null로 설정하십시오.
+
+    **WARN 케이스 처리:**
+    - change_pct가 "WARN N-1=0,N!=0" 또는 "WARN N-1!=0,N=0"인 PEG에 대해서만 간결한 인사이트 제공
+    - 각 WARN PEG의 급증/급감 원인 가설 및 다른 PEG와의 연관성 설명 (1-2문장)
+    - **중요:** WARN이 아닌 일반 PEG는 반드시 null로 설정
 
     [출력 형식 제약]
     - 분석 결과는 반드시 아래의 JSON 스키마를 정확히 준수하여 생성해야 합니다.
@@ -74,7 +87,10 @@ prompts:
           "action": "구체적 실행 항목",
           "details": "필요 데이터/도구 및 수행 방법"
         }}
-      ]
+      ],
+      "peg_insights": {{
+        "PEG_NAME": "해당 PEG에 대한 한국어 통찰/설명 (WARN 케이스만 제공, 일반 PEG는 null)"
+      }}
     }}
 
   # 특정 PEG 집합 분석 프롬프트 (주석처리: 사용되지 않음)

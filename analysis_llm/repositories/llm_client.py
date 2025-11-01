@@ -416,6 +416,26 @@ class LLMClient(LLMRepository):
             "max_tokens": self.config["max_tokens"],
         }
 
+        # 페이로드의 총 토큰 수 계산 및 로깅
+        try:
+            # messages 리스트의 모든 content 길이 합계 계산
+            total_chars = sum(
+                len(msg.get("content", "")) 
+                for msg in payload.get("messages", [])
+            )
+            # 토큰 수 추정 (estimate_tokens 메서드 사용)
+            total_estimated_tokens = self.estimate_tokens(
+                "".join(msg.get("content", "") for msg in payload.get("messages", []))
+            )
+            logger.info(
+                "LLM POST 요청 페이로드 토큰 수: 총_문자=%d자, 추정_토큰=%d토큰, max_tokens=%d토큰",
+                total_chars,
+                total_estimated_tokens,
+                payload.get("max_tokens", 0)
+            )
+        except Exception as e:
+            logger.warning("토큰 수 계산 중 오류 발생: %s", e)
+
         # 멀티 엔드포인트 페일오버 실행
         return self._execute_with_failover(payload)
 

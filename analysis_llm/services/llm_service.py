@@ -114,9 +114,9 @@ class BasePromptStrategy(ABC):
             df = df.head(max_rows)
             logger.debug("DataFrame 행 수 제한 적용: %d행으로 단축", max_rows)
 
-        # 테이블 형태로 변환
-        formatted = df.to_string(index=False, max_cols=10)
-        logger.debug("DataFrame 포맷팅 완료: %d행, %d컬럼", len(df), len(df.columns))
+        # CSV 포맷으로 변환 (토큰 최적화: 공백 낭비 0%)
+        formatted = df.to_csv(index=False)
+        logger.debug("DataFrame 포맷팅 완료: %d행, %d컬럼 (CSV 포맷)", len(df), len(df.columns))
 
         return formatted
 
@@ -175,15 +175,25 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
             )
 
         # 데이터 포맷팅 - 모든 PEG 포함 (데이터 유실 방지)
-        preview_cols = [c for c in processed_df.columns if c in ("peg_name", "avg_value", "period", "change_pct")]
+        # LLM이 cell별 성능을 구분할 수 있도록 cellid 정보 추가
+        preview_df = processed_df.copy()
+        
+        # dimensions에서 CellIdentity만 추출하여 별도 컬럼 추가 (토큰 절약)
+        if 'dimensions' in preview_df.columns:
+            preview_df['cellid'] = preview_df['dimensions'].str.extract(r'CellIdentity=(\d+)', expand=False)
+            logger.debug("cellid 컬럼 추가: dimensions에서 CellIdentity 추출")
+        
+        # 최종 프롬프트용 컬럼 선택 (cellid로 변경, dimensions는 제외)
+        preview_cols = []
+        for col in ["peg_name", "cellid", "avg_value", "period", "change_pct"]:
+            if col in preview_df.columns:
+                preview_cols.append(col)
+        
         if not preview_cols:
-            preview_cols = list(processed_df.columns)[:6]
-
-        # 모든 PEG를 포함하도록 수정 (행 수 제한 제거)
-        # 기존: preview_rows = int(os.getenv("PROMPT_PREVIEW_ROWS", "200"))
-        # 기존: preview_df = processed_df[preview_cols].head(preview_rows)
-        preview_df = processed_df[preview_cols]  # 모든 데이터 포함
-        logger.info("프롬프트 데이터 준비: 전체 %d행 포함 (모든 PEG 포함)", len(preview_df))
+            preview_cols = list(preview_df.columns)[:6]
+        
+        preview_df = preview_df[preview_cols]  # 모든 데이터 포함
+        logger.info("프롬프트 데이터 준비: 전체 %d행, %d컬럼 포함 (cell 정보 포함)", len(preview_df), len(preview_cols))
         data_preview = self.format_dataframe_for_prompt(preview_df)
 
         # YAML 프롬프트 템플릿 사용
@@ -215,10 +225,9 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
 - 기간 n-1: {n1_range}
 - 기간 n: {n_range}
 - 핵심 가정: 두 기간은 동일한 시험환경(동일 하드웨어, 기본 파라미터, 트래픽 모델)에서 수행되었습니다.
-- 입력 데이터는 PEG 단위로 집계된 평균값이며, 개별 셀(cell) 데이터는 포함되어 있지 않습니다. 따라서 셀 단위의 특정 문제 식별은 불가능하며, 집계 데이터 기반의 거시적 분석을 수행해야 합니다.
 
 [입력 데이터]
-- 컬럼 설명: peg_name(PEG 이름), avg_n_minus_1(기간 n-1 평균), avg_n(기간 n 평균), diff(변화량), pct_change(변화율)
+- 컬럼 설명: peg_name(PEG 이름), cellid(셀 ID, 집계되지 않은 경우 해당 셀 식별자), avg_value(집계된 평균값), period(기간: N-1 또는 N), change_pct(변화율 %)
 - 데이터 테이블:
 {data_preview}
 
@@ -226,7 +235,13 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
 아래의 4단계 연쇄적 사고(Chain-of-Thought) 진단 워크플로우를 엄격히 따라서 분석을 수행하십시오.
 
 # [LLM-1] 문제 분류 및 중요도 평가 (Triage and Significance Assessment)
-먼저, 입력 테이블의 모든 PEG를 검토하여 가장 심각한 '부정적' 변화를 보인 상위 3~5개의 PEG를 식별하십시오. '중요도'는 'pct_change'의 절대값 크기와 해당 PEG의 운영상 '고객 영향도'를 종합하여 판단합니다. 각 PEG가 영향을 미치는 3GPP 서비스 범주(Accessibility, Retainability, Mobility, Integrity, Latency)에 따라 영향도를 분류하고, 가장 시급하게 다루어야 할 문제를 선정하십시오.
+먼저, 입력 테이블의 모든 PEG를 검토하여 가장 심각한 '부정적' 변화를 보인 상위 3~5개의 PEG를 식별하십시오. '중요도'는 'change_pct'의 절대값 크기와 해당 PEG의 운영상 '고객 영향도'를 종합하여 판단합니다. 각 PEG가 영향을 미치는 3GPP 서비스 범주(Accessibility, Retainability, Mobility, Integrity, Latency)에 따라 영향도를 분류하고, 가장 시급하게 다루어야 할 문제를 선정하십시오.
+
+**특별 주의: change_pct가 "WARN N-1=0,N!=0"인 경우:**
+이것은 PEG가 N-1 기간에는 0이었지만 N 기간에 갑자기 증가한 급증 현상입니다. 이 경우, 다른 PEG의 급증 패턴과 연관성을 반드시 분석하여 어떤 다른 PEG의 변화가 이 PEG에 영향을 주었는지, 또는 어떤 이벤트가 동시에 여러 PEG를 급증시켰는지 논리적으로 추론하십시오.
+
+**특별 주의: change_pct가 "WARN N-1!=0,N=0"인 경우:**
+이것은 PEG가 N-1 기간에는 값이 있었지만 N 기간에 0으로 감소한 급감 현상입니다. 이 경우, 다른 PEG의 급증이나 급감 패턴과 연관성을 반드시 분석하여 어떤 다른 PEG의 변화가 이 PEG를 0으로 만들었는지, 또는 시스템 설정이나 파라미터 변경이 영향을 주었는지 논리적으로 추론하십시오.
 
 # [LLM-2] 주제별 그룹화 및 핵심 가설 생성 (Thematic Grouping and Primary Hypothesis Generation)
 [LLM-1]에서 식별된 우선순위가 높은 문제들에 대해, 연관된 PEG들을 논리적으로 그룹화하여 '진단 주제(Diagnostic Theme)'를 정의하십시오. (예: 다수의 접속 관련 PEG 악화 -> 'Accessibility Degradation' 주제). 각 주제에 대해, 3GPP 호 처리 절차(Call Flow) 및 운영 경험에 기반하여 가장 개연성 높은 단일 '핵심 가설(Primary Hypothesis)'을 수립하십시오. 이 가설은 구체적이고 검증 가능해야 합니다.
@@ -236,6 +251,14 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
 
 # [LLM-4] 증거 기반의 검증 계획 수립 (Formulation of an Evidence-Based Verification Plan)
 각 핵심 가설에 대해, 현장 엔지니어가 즉시 수행할 수 있는 구체적이고 우선순위가 부여된 '검증 계획'을 수립하십시오. 조치는 반드시 구체적이어야 합니다. (예: '로그 확인' 대신 '특정 카운터(pmRachAtt) 추이 분석'). 조치별로 P1(즉시 조치), P2(심층 조사), P3(정기 감사)와 같은 우선순위를 부여하고, 필요한 데이터(카운터, 파라미터 등)나 도구를 명시하십시오.
+
+# [LLM-5] PEG별 인사이트 제공 (PEG-Specific Insights)
+입력 데이터 테이블에서 **WARN 케이스만** 식별하여 해당 PEG들의 인사이트를 제공하십시오. WARN 케이스가 아닌 PEG는 null로 설정하십시오.
+
+**WARN 케이스 처리:**
+- change_pct가 "WARN N-1=0,N!=0" 또는 "WARN N-1!=0,N=0"인 PEG에 대해서만 간결한 인사이트 제공
+- 각 WARN PEG의 급증/급감 원인 가설 및 다른 PEG와의 연관성 설명 (1-2문장)
+- **중요:** WARN이 아닌 일반 PEG는 반드시 null로 설정
 
 [출력 형식 제약]
 - 분석 결과는 반드시 아래의 JSON 스키마를 정확히 준수하여 생성해야 합니다.
@@ -257,7 +280,10 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
       "action": "구체적 실행 항목",
       "details": "필요 데이터/도구 및 수행 방법"
     }}
-  ]
+  ],
+  "peg_insights": {{
+    "PEG_NAME": "해당 PEG에 대한 한국어 통찰/설명 (WARN 케이스만 제공, 일반 PEG는 null)"
+  }}
 }}"""
 
             logger.info("하드코딩된 enhanced 프롬프트 생성 완료: %d자", len(prompt))
@@ -438,7 +464,19 @@ class LLMAnalysisService:
             # 프롬프트 생성
             log_step(logger, "[LLM 단계 1] 프롬프트 생성 시작", f"전략={strategy.get_strategy_name()}")
             prompt = strategy.build_prompt(processed_df, n1_range, n_range, **kwargs)
-            log_data_flow(logger, "생성된 프롬프트", {"prompt": prompt, "length": len(prompt)})
+            
+            # 프롬프트 상세 로깅 (DEBUG2 레벨)
+            # 환경변수에 따라 더 긴 프롬프트를 로그에 남길 수 있음
+            import os
+            log_max_length = int(os.getenv('LOG_MAX_LENGTH', '1000'))
+            
+            # 프롬프트 미리보기 생성
+            if len(prompt) > log_max_length:
+                prompt_preview = prompt[:log_max_length] + f"\n... (총 {len(prompt)}자, {log_max_length}자까지만 표시)"
+            else:
+                prompt_preview = prompt
+            
+            log_data_flow(logger, "생성된 프롬프트 (PEG 포함)", {"length": len(prompt), "preview": prompt_preview})
 
             # 프롬프트 검증
             if not self.llm_repository.validate_prompt(prompt):

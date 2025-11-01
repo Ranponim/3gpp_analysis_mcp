@@ -378,17 +378,20 @@ class BackendPayloadBuilder:
             "  전체 키: %s\n"
             "  executive_summary: %s\n"
             "  diagnostic_findings: %s\n"
-            "  recommended_actions: %s",
+            "  recommended_actions: %s\n"
+            "  peg_insights: %s",
             list(llm_data.keys()) if isinstance(llm_data, dict) else type(llm_data).__name__,
             "있음" if llm_data.get("executive_summary") else "없음",
             "있음" if llm_data.get("diagnostic_findings") else "없음",
-            "있음" if llm_data.get("recommended_actions") else "없음"
+            "있음" if llm_data.get("recommended_actions") else "없음",
+            "있음" if llm_data.get("peg_insights") else "없음"
         )
         
         # Enhanced 프롬프트 구조 그대로 추출
         executive_summary = llm_data.get("executive_summary")
         diagnostic_findings = llm_data.get("diagnostic_findings", [])
         recommended_actions = llm_data.get("recommended_actions", [])
+        peg_insights = llm_data.get("peg_insights", {})
         
         # 추가 분석 필드 추출 (심도 있는 분석용) - 타입 정규화
         technical_analysis = llm_data.get("technical_analysis")
@@ -425,6 +428,7 @@ class BackendPayloadBuilder:
             "executive_summary": executive_summary,
             "diagnostic_findings": diagnostic_findings,
             "recommended_actions": recommended_actions,
+            "peg_insights": peg_insights,
             
             # 추가 분석 필드 (Optional)
             "technical_analysis": technical_analysis,
@@ -443,6 +447,7 @@ class BackendPayloadBuilder:
             "  executive_summary: %s (type: %s)\n"
             "  diagnostic_findings: %d개 (type: %s)\n"
             "  recommended_actions: %d개 (type: %s)\n"
+            "  peg_insights: %s (type: %s)\n"
             "  technical_analysis: %s (type: %s)\n"
             "  cells_with_significant_change: %s (type: %s)\n"
             "  action_plan: %s (type: %s)\n"
@@ -455,6 +460,8 @@ class BackendPayloadBuilder:
             type(result["diagnostic_findings"]).__name__,
             len(result["recommended_actions"]) if isinstance(result["recommended_actions"], list) else 0,
             type(result["recommended_actions"]).__name__,
+            f"{len(result['peg_insights'])}개" if result["peg_insights"] else "없음",
+            type(result["peg_insights"]).__name__,
             "있음" if result["technical_analysis"] else "없음",
             type(result["technical_analysis"]).__name__,
             f"{len(result['cells_with_significant_change'])}개" if result["cells_with_significant_change"] else "없음",
