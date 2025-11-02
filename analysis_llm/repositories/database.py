@@ -936,6 +936,8 @@ class PostgreSQLRepository(DatabaseRepository):
                 "fetch_peg_data(): 재귀 JSONB 확장 쿼리 구성 완료 | sql_len=%d, params_keys=%s",
                 len(query), list(params.keys())
             )
+            logger.info("fetch_peg_data(): SQL 쿼리=\n%s", query)
+            logger.info("fetch_peg_data(): SQL 파라미터=%s", params)
             logger.debug("fetch_peg_data(): SQL preview=%s", query[:5000].replace('\n',' '))
             # 주의: 이미 WHERE/ORDER BY/LIMIT가 포함되어 있으므로 fetch_data에 time_range/limit 전달하지 않음
             
