@@ -18,7 +18,7 @@ import sys
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import psycopg2
 import psycopg2.extras
@@ -731,12 +731,6 @@ class PostgreSQLRepository(DatabaseRepository):
             if relver_col:
                 select_parts.append("rel_ver")
             
-            # 차원 정보: "CellIdentity=20,PLMN=0,gnb_ID=0,SPIDIncludingInvalid=0,QCI=0" 형식
-            select_parts.append(
-                "(SELECT string_agg(dimension_names[i] || '=' || dimension_values[i], ',') "
-                "FROM generate_subscripts(dimension_names, 1) AS i) AS dimensions"
-            )
-            
             # peg_name: path_key (리프 노드의 키, 즉 실제 PEG 메트릭명)
             select_parts.append("path_key AS peg_name")
             
@@ -775,7 +769,13 @@ class PostgreSQLRepository(DatabaseRepository):
                 "END AS text_value"
             )
             
-            query = (
+            # 차원 정보: CTE에서 이미 계산된 dimension_names와 dimension_values를 사용
+            # WHERE 절에서 사용할 수 있도록 외부 쿼리에서 dimensions 계산
+            select_parts.append("dimension_names")
+            select_parts.append("dimension_values")
+            
+            # 기본 쿼리: flattened CTE에서 리프 노드만 선택
+            inner_query = (
                 f"{recursive_cte} "
                 f"SELECT {', '.join(select_parts)} FROM flattened "
                 f"WHERE jsonb_typeof(current_val) <> 'object'"  # 리프 노드만 (스칼라 값)
@@ -863,9 +863,44 @@ class PostgreSQLRepository(DatabaseRepository):
                             additional_conditions.append(f"{key} = %({key})s")
                             params[key] = value
 
+            # 외부 쿼리 구성: inner_query를 서브쿼리로 사용하고 dimensions를 계산
+            # - WITH 절로 inner_query를 서브쿼리로 사용
+            # - dimensions를 계산하는 중간 단계 추가
+            # - WHERE 절에서 dimensions를 사용 가능하도록 함
+            outer_select_parts = [
+                "timestamp",
+                "family_id", 
+                "family_name"
+            ]
+            if ne_col:
+                outer_select_parts.append("ne")
+            if swname_col:
+                outer_select_parts.append("swname")
+            if relver_col:
+                outer_select_parts.append("rel_ver")
+            outer_select_parts.append("peg_name")
+            outer_select_parts.append("value")
+            outer_select_parts.append("text_value")
+            
+            # dimensions 계산을 중간 단계에서 수행
+            outer_select_parts.append(
+                "(SELECT string_agg(dimension_names[i] || '=' || dimension_values[i], ',') "
+                "FROM generate_subscripts(dimension_names, 1) AS i) AS dimensions"
+            )
+            
+            # 중간 단계: dimensions를 계산하는 CTE
+            query = (
+                f"WITH inner_data AS ({inner_query}), "
+                f"     data_with_dimensions AS ("
+                f"         SELECT {', '.join(outer_select_parts)} FROM inner_data"
+                f"     ) "
+                f"SELECT * FROM data_with_dimensions"
+            )
+            
+            # 외부 쿼리에 WHERE 조건 추가 (dimensions 사용 가능)
             if additional_conditions:
-                query += " AND " + " AND ".join(additional_conditions)
-
+                query += " WHERE " + " AND ".join(additional_conditions)
+            
             query += " ORDER BY timestamp"
             if limit and limit > 0:
                 query += f" LIMIT {limit}"
