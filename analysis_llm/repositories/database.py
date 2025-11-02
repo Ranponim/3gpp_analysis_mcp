@@ -637,12 +637,24 @@ class PostgreSQLRepository(DatabaseRepository):
                     placeholders = ",".join([f"%(ne_filter_{i})s" for i, _ in enumerate(ne_values)])
                     cte_anchor_conditions.append(f"t.{ne_col_name} IN ({placeholders})")
                     for i, v in enumerate(ne_values):
-                        params[f"ne_filter_{i}"] = v
+                        # ne_key 컬럼은 정수이므로 변환
+                        try:
+                            params[f"ne_filter_{i}"] = int(v)
+                        except (ValueError, TypeError):
+                            # 변환 실패 시 원본 값 사용 (로깅)
+                            logger.warning("ne 필터 값 변환 실패: %s (원본 사용)", v)
+                            params[f"ne_filter_{i}"] = v
                     logger.debug("ne 필터: IN 조건으로 %d개 값 적용", len(ne_values))
                 else:
                     # ne_id가 단일 값일 경우
                     cte_anchor_conditions.append(f"t.{ne_col_name} = %(ne_filter)s")
-                    params['ne_filter'] = ne_values
+                    # ne_key 컬럼은 정수이므로 변환
+                    try:
+                        params['ne_filter'] = int(ne_values)
+                    except (ValueError, TypeError):
+                        # 변환 실패 시 원본 값 사용 (로깅)
+                        logger.warning("ne 필터 값 변환 실패: %s (원본 사용)", ne_values)
+                        params['ne_filter'] = ne_values
                     logger.debug("ne 필터: 단일 값 조건 적용")
                 
                 # 처리된 필터는 나중에 중복 적용되지 않도록 제거
