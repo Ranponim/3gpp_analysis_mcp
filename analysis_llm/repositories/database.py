@@ -786,6 +786,16 @@ class PostgreSQLRepository(DatabaseRepository):
 
             # 추가 필터 (재귀 CTE 후 적용)
             additional_conditions: List[str] = []
+            
+            # inner_data에서 선택 가능한 컬럼 목록 정의
+            # 이 컬럼들은 outer_select_parts에도 포함되어야 함
+            inner_data_columns = {'timestamp', 'family_id', 'family_name', 'peg_name', 'value', 'text_value', 'dimension_names', 'dimension_values'}
+            if ne_col:
+                inner_data_columns.add('ne')
+            if swname_col:
+                inner_data_columns.add('swname')
+            if relver_col:
+                inner_data_columns.add('rel_ver')
 
             # --- [CSV 필터 로직] ---
             # 2. peg_name 필터링 (family_id는 이미 CTE anchor에서 필터링됨)
@@ -803,11 +813,11 @@ class PostgreSQLRepository(DatabaseRepository):
                     peg_like_conditions = []
                     for j, peg_name in enumerate(peg_names):
                         peg_param_key = f"csv_peg_{i}_{j}"
-                        # path_key가 peg_name으로 시작하는 경우 매칭 (LIKE 'AirMacDLThruAvg%')
-                        peg_like_conditions.append(f"path_key LIKE %({peg_param_key})s")
+                        # peg_name이 CSV peg_name으로 시작하는 경우 매칭 (LIKE 'AirMacDLThruAvg%')
+                        peg_like_conditions.append(f"peg_name LIKE %({peg_param_key})s")
                         params[peg_param_key] = f"{peg_name}%"  # 접두어 매칭
                     
-                    # (family_id = %s AND (path_key LIKE %s OR path_key LIKE %s ...))
+                    # (family_id = %s AND (peg_name LIKE %s OR peg_name LIKE %s ...))
                     # family_id는 DB의 family_id 컬럼 (int)
                     # family_id는 CSV에서 로드한 정수 (예: 5002)
                     peg_conditions_str = " OR ".join(peg_like_conditions)
@@ -852,6 +862,11 @@ class PostgreSQLRepository(DatabaseRepository):
                         # 테이블 컬럼 기반 필터 (ne, swname 등)
                         col_name = columns.get(key)
                         if not col_name:
+                            continue
+                        
+                        # inner_data에 실제로 존재하는 컬럼인지 확인
+                        if key not in inner_data_columns:
+                            logger.warning("필터 키 '%s'는 inner_data에 존재하지 않습니다. 스킵합니다.", key)
                             continue
                         
                         if isinstance(value, (list, tuple, set)) and value:
