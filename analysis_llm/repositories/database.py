@@ -534,6 +534,11 @@ class PostgreSQLRepository(DatabaseRepository):
         Returns:
             List[Dict[str, Any]]: PEG 데이터 목록
         """
+        # 입력 딕셔너리 보호: filters를 수정하지 않도록 복사본 생성
+        # 버그 수정: del filters['ne']로 입력 딕셔너리를 직접 수정하는 것을 방지
+        if filters is not None:
+            filters = filters.copy()  # None이 아닌 경우 복사 (빈 딕셔너리 포함)
+        
         logger.info("fetch_peg_data(): 호출 | table=%s, time_range=%s, filters_keys=%s",
                     table_name, time_range, list((filters or {}).keys()))
         # 컨텍스트 요약 로그
@@ -625,19 +630,25 @@ class PostgreSQLRepository(DatabaseRepository):
                 ne_values = filters['ne']
                 ne_col_name = columns.get('ne') or columns.get('ne_key') or 'ne_key'
                 
+                logger.info("🔍 ne 필터 적용: 컬럼=%s, 값=%s", ne_col_name, ne_values)
+                
                 if isinstance(ne_values, (list, tuple, set)):
                     # ne_id가 여러 개일 경우 IN 사용
                     placeholders = ",".join([f"%(ne_filter_{i})s" for i, _ in enumerate(ne_values)])
                     cte_anchor_conditions.append(f"t.{ne_col_name} IN ({placeholders})")
                     for i, v in enumerate(ne_values):
                         params[f"ne_filter_{i}"] = v
+                    logger.debug("ne 필터: IN 조건으로 %d개 값 적용", len(ne_values))
                 else:
                     # ne_id가 단일 값일 경우
                     cte_anchor_conditions.append(f"t.{ne_col_name} = %(ne_filter)s")
                     params['ne_filter'] = ne_values
+                    logger.debug("ne 필터: 단일 값 조건 적용")
                 
                 # 처리된 필터는 나중에 중복 적용되지 않도록 제거
                 del filters['ne']
+            else:
+                logger.debug("ne 필터: 적용되지 않음 (filters=%s)", filters.get('ne') if filters else None)
 
             # index_name 키는 메타데이터이므로 모든 레벨에서 제외
             cte_anchor_conditions.append("kv.key <> 'index_name'")
@@ -819,6 +830,8 @@ class PostgreSQLRepository(DatabaseRepository):
                     # 차원 필터 (cellid, qci, bpu_id) - dimensions 컬럼에서 검색
                     if key in dimension_alias_map:
                         dimension_key = dimension_alias_map[key]
+                        logger.info("🔍 차원 필터 적용: 필터키=%s, 차원키=%s, 값=%s", key, dimension_key, value)
+                        
                         # dimensions 문자열에서 "CellIdentity=20" 형태로 검색
                         if isinstance(value, (list, tuple, set)) and value:
                             # 다중 값: dimensions에 포함되는지 OR 조건으로 검사
@@ -828,11 +841,13 @@ class PostgreSQLRepository(DatabaseRepository):
                                 or_conditions.append(f"dimensions LIKE %({param_key})s")
                                 params[param_key] = f"%{dimension_key}={v}%"
                             additional_conditions.append(f"({' OR '.join(or_conditions)})")
+                            logger.debug("차원 필터: LIKE 조건으로 %d개 값 적용", len(value))
                         else:
                             # 단일 값
                             param_key = f"dim_{key}"
                             additional_conditions.append(f"dimensions LIKE %({param_key})s")
                             params[param_key] = f"%{dimension_key}={value}%"
+                            logger.debug("차원 필터: 단일 값 LIKE 조건 적용")
                     else:
                         # 테이블 컬럼 기반 필터 (ne, swname 등)
                         col_name = columns.get(key)

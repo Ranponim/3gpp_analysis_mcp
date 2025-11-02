@@ -200,15 +200,26 @@ class AnalysisRequest:
         )
 
         # 필터 설정
+        # filters 딕셔너리가 있으면 우선 사용, 없으면 최상위 레벨에서 찾기 (하위 호환성)
+        # 버그 수정: "filters" 키 존재 여부를 확인하여 빈 딕셔너리도 명시적 필터로 처리
+        if "filters" in data:
+            filter_source = data["filters"]
+            filters_dict = data["filters"]
+        else:
+            filter_source = data
+            filters_dict = {}
+        
         filter_config = FilterConfig(
-            ne=data.get("ne"),
-            cellid=data.get("cellid"),
-            cell=data.get("cell"),
-            host=data.get("host"),
-            preference=data.get("preference"),
-
+            ne=filter_source.get("ne"),
+            cellid=filter_source.get("cellid"),
+            cell=filter_source.get("cell"),
+            host=filter_source.get("host"),
+            preference=filter_source.get("preference"),
             peg_filter_file=data.get("peg_filter_file"),
         )
+        
+        logger.debug("필터 소스 사용: filters 키 존재=%s, 필터 값: ne=%s, cellid=%s", 
+                     "filters" in data, filter_config.ne, filter_config.cellid)
 
         # PEG 설정
         peg_config = PEGConfig(peg_definitions=data.get("peg_definitions", {}))
@@ -230,7 +241,20 @@ class AnalysisRequest:
 
     def to_dict(self) -> Dict[str, Any]:
         """AnalysisRequest를 딕셔너리로 변환"""
-        return {
+        # filters 딕셔너리 구성 (None 값 제외)
+        filters_dict = {}
+        if self.filter_config.ne is not None:
+            filters_dict["ne"] = self.filter_config.ne
+        if self.filter_config.cellid is not None:
+            filters_dict["cellid"] = self.filter_config.cellid
+        if self.filter_config.host is not None:
+            filters_dict["host"] = self.filter_config.host
+        if self.filter_config.preference is not None:
+            filters_dict["preference"] = self.filter_config.preference
+        
+        logger.debug("to_dict() 변환: filters 딕셔너리=%s", filters_dict)
+        
+        result = {
             "n_minus_1": self.n_minus_1,
             "n": self.n,
             "output_dir": self.output_dir,
@@ -252,11 +276,17 @@ class AnalysisRequest:
                 "cellid": self.table_config.cellid_column,
                 "host": self.table_config.host_column,
             },
-            "ne": self.filter_config.ne,
-            "cellid": self.filter_config.cellid,
-            "host": self.filter_config.host,
-            "preference": self.filter_config.preference,
-
+            # filters 딕셔너리 형태로 반환 (analysis_service 호환성)
+            "filters": filters_dict if filters_dict else {},
+            # 하위 호환성을 위해 최상위 레벨에도 포함 (None이 아닌 경우만)
+            **({k: v for k, v in {
+                "ne": self.filter_config.ne,
+                "cellid": self.filter_config.cellid,
+                "host": self.filter_config.host,
+                "preference": self.filter_config.preference,
+            }.items() if v is not None}),
             "peg_filter_file": self.filter_config.peg_filter_file,
             "peg_definitions": self.peg_config.peg_definitions,
         }
+        
+        return result

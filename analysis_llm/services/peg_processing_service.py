@@ -495,7 +495,9 @@ class PEGProcessingService:
                     pivot_df.loc[valid_mask, "change_pct"] = ((pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) / pivot_df.loc[valid_mask, "N-1"] * 100)
                     
                     # 변화율이 음수인 경우 상세 로깅 (큰 변화만)
-                    large_negative_changes = pivot_df[(pivot_df["change_pct"] < -20) & valid_mask]
+                    # change_pct가 숫자 타입인 경우만 비교 (문자열 "WARN ..." 값 제외)
+                    change_pct_numeric_mask = pd.to_numeric(pivot_df["change_pct"], errors='coerce').notna()
+                    large_negative_changes = pivot_df[(change_pct_numeric_mask) & (pd.to_numeric(pivot_df["change_pct"], errors='coerce') < -20) & valid_mask]
                     if len(large_negative_changes) > 0:
                         logger.warning("⚠️ 큰 폭의 감소가 발견되었습니다 (변화율 < -20%):")
                         for peg_name, row in large_negative_changes.iterrows():

@@ -513,6 +513,18 @@ class AnalysisService:
                     }
                     filters_dict = request.get("filters", {})
                     logger.info("전달되는 filters 딕셔너리: %s", filters_dict)
+                    
+                    # 필터 값 상세 로깅 (디버깅용)
+                    if filters_dict:
+                        logger.debug(
+                            "필터 상세 정보: ne=%s, cellid=%s, host=%s, preference=%s",
+                            filters_dict.get("ne"),
+                            filters_dict.get("cellid"),
+                            filters_dict.get("host"),
+                            filters_dict.get("preference"),
+                        )
+                    else:
+                        logger.warning("⚠️ filters 딕셔너리가 비어있습니다. 필터가 적용되지 않을 수 있습니다.")
                     processed_df = self.peg_processing_service.process_peg_data(
                         time_ranges=time_ranges,
                         table_config=table_config,
