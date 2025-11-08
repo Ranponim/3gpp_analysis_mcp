@@ -278,13 +278,6 @@ class AnalysisRequest:
             },
             # filters 딕셔너리 형태로 반환 (analysis_service 호환성)
             "filters": filters_dict if filters_dict else {},
-            # 하위 호환성을 위해 최상위 레벨에도 포함 (None이 아닌 경우만)
-            **({k: v for k, v in {
-                "ne": self.filter_config.ne,
-                "cellid": self.filter_config.cellid,
-                "host": self.filter_config.host,
-                "preference": self.filter_config.preference,
-            }.items() if v is not None}),
             "peg_filter_file": self.filter_config.peg_filter_file,
             "peg_definitions": self.peg_config.peg_definitions,
         }

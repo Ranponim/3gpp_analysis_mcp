@@ -850,11 +850,14 @@ class PostgreSQLRepository(DatabaseRepository):
                         continue
                     
                     # 차원 필터 (cellid, qci, bpu_id) - dimensions 컬럼에서 검색
+                    # 중요: index_name이 없는 데이터(dimensions가 빈 문자열/NULL)도 포함해야 함
+                    # 논리: (차원이 일치) OR (차원 정보가 없음 = 해당 index_name이 존재하지 않음)
                     if key in dimension_alias_map:
                         dimension_key = dimension_alias_map[key]
                         logger.info("🔍 차원 필터 적용: 필터키=%s, 차원키=%s, 값=%s", key, dimension_key, value)
                         
                         # dimensions 문자열에서 "CellIdentity=20" 형태로 검색
+                        # OR 조건: dimensions에 해당 index_name이 포함되지 않은 경우도 포함
                         if isinstance(value, (list, tuple, set)) and value:
                             # 다중 값: dimensions에 포함되는지 OR 조건으로 검사
                             or_conditions = []
@@ -862,14 +865,27 @@ class PostgreSQLRepository(DatabaseRepository):
                                 param_key = f"dim_{key}_{i}"
                                 or_conditions.append(f"dimensions LIKE %({param_key})s")
                                 params[param_key] = f"%{dimension_key}={v}%"
+                            
+                            # 핵심 수정: index_name이 없는 데이터도 포함
+                            # dimensions에 해당 dimension_key가 아예 없으면 (NOT LIKE '%CellIdentity=%') 포함
+                            or_conditions.append(f"(dimensions IS NULL OR dimensions NOT LIKE %({param_key}_check)s)")
+                            params[f"{param_key}_check"] = f"%{dimension_key}=%"
+                            
                             additional_conditions.append(f"({' OR '.join(or_conditions)})")
-                            logger.debug("차원 필터: LIKE 조건으로 %d개 값 적용", len(value))
+                            logger.debug("차원 필터: LIKE 조건으로 %d개 값 적용 (index_name 없는 데이터 포함)", len(value))
                         else:
                             # 단일 값
                             param_key = f"dim_{key}"
-                            additional_conditions.append(f"dimensions LIKE %({param_key})s")
+                            # 핵심 수정: (일치) OR (해당 차원 정보가 없음)
+                            condition = (
+                                f"(dimensions LIKE %({param_key})s OR "
+                                f"dimensions IS NULL OR "
+                                f"dimensions NOT LIKE %({param_key}_check)s)"
+                            )
+                            additional_conditions.append(condition)
                             params[param_key] = f"%{dimension_key}={value}%"
-                            logger.debug("차원 필터: 단일 값 LIKE 조건 적용")
+                            params[f"{param_key}_check"] = f"%{dimension_key}=%"
+                            logger.debug("차원 필터: 단일 값 LIKE 조건 적용 (index_name 없는 데이터 포함)")
                     else:
                         # 테이블 컬럼 기반 필터 (ne, swname 등)
                         col_name = columns.get(key)
