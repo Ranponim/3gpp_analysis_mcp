@@ -437,9 +437,10 @@ class PEGProcessingService:
                 if invalid_n1_only.sum() > 0:
                     logger.warning(
                         f"⚠️ 신규 발생 패턴 감지: N-1=NULL에서 N=값으로 나타난 PEG {invalid_n1_only.sum()}개 "
-                        f"→ change_pct='WARN N-1=NULL,N!=NULL'로 설정하여 LLM에 전달"
+                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
                     )
-                    pivot_df.loc[invalid_n1_only, "change_pct"] = "WARN N-1=NULL,N!=NULL"
+                    # 타입 안전성을 위해 None 저장 (문자열 대신)
+                    pivot_df.loc[invalid_n1_only, "change_pct"] = None
                     
                     from config.logging_config import log_at_debug2
                     invalid_pegs = pivot_df[invalid_n1_only].index.tolist()
@@ -458,9 +459,10 @@ class PEGProcessingService:
                 if invalid_n_only.sum() > 0:
                     logger.warning(
                         f"⚠️ 소멸 패턴 감지: N-1=값에서 N=NULL로 사라진 PEG {invalid_n_only.sum()}개 "
-                        f"→ change_pct='WARN N-1!=NULL,N=NULL'로 설정하여 LLM에 전달"
+                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
                     )
-                    pivot_df.loc[invalid_n_only, "change_pct"] = "WARN N-1!=NULL,N=NULL"
+                    # 타입 안전성을 위해 None 저장 (문자열 대신)
+                    pivot_df.loc[invalid_n_only, "change_pct"] = None
                     
                     from config.logging_config import log_at_debug2
                     invalid_pegs = pivot_df[invalid_n_only].index.tolist()
@@ -507,10 +509,10 @@ class PEGProcessingService:
                 if zero_to_nonzero_mask.sum() > 0:
                     logger.warning(
                         f"⚠️ 급증 패턴 감지: N-1=0에서 N≠0으로 증가한 PEG {zero_to_nonzero_mask.sum()}개 "
-                        f"→ change_pct='WARN N-1=0,N!=0'로 설정하여 LLM에 경고 전달"
+                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
                     )
-                    # 특별 값으로 표시 (LLM이 인식 가능하도록)
-                    pivot_df.loc[zero_to_nonzero_mask, "change_pct"] = "WARN N-1=0,N!=0"
+                    # 타입 안전성을 위해 None 저장 (문자열 대신)
+                    pivot_df.loc[zero_to_nonzero_mask, "change_pct"] = None
                     
                     # 🔍 상세 로깅
                     from config.logging_config import log_at_debug2
@@ -529,10 +531,10 @@ class PEGProcessingService:
                 if nonzero_to_zero_mask.sum() > 0:
                     logger.warning(
                         f"⚠️ 급감 패턴 감지: N-1≠0에서 N=0으로 감소한 PEG {nonzero_to_zero_mask.sum()}개 "
-                        f"→ change_pct='WARN N-1!=0,N=0'로 설정하여 LLM에 경고 전달"
+                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
                     )
-                    # 특별 값으로 표시
-                    pivot_df.loc[nonzero_to_zero_mask, "change_pct"] = "WARN N-1!=0,N=0"
+                    # 타입 안전성을 위해 None 저장 (문자열 대신)
+                    pivot_df.loc[nonzero_to_zero_mask, "change_pct"] = None
                     
                     # 🔍 상세 로깅
                     from config.logging_config import log_at_debug2
@@ -567,9 +569,10 @@ class PEGProcessingService:
                     pivot_df.loc[valid_mask, "change_pct"] = ((pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) / pivot_df.loc[valid_mask, "N-1"] * 100)
                     
                     # 변화율이 음수인 경우 상세 로깅 (큰 변화만)
-                    # change_pct가 숫자 타입인 경우만 비교 (문자열 "WARN ..." 값 제외)
-                    change_pct_numeric_mask = pd.to_numeric(pivot_df["change_pct"], errors='coerce').notna()
-                    large_negative_changes = pivot_df[(change_pct_numeric_mask) & (pd.to_numeric(pivot_df["change_pct"], errors='coerce') < -20) & valid_mask]
+                    # change_pct는 이제 항상 숫자 또는 None이므로 직접 비교 가능
+                    large_negative_changes = pivot_df[
+                        pivot_df["change_pct"].notna() & (pivot_df["change_pct"] < -20)
+                    ]
                     if len(large_negative_changes) > 0:
                         logger.warning("⚠️ 큰 폭의 감소가 발견되었습니다 (변화율 < -20%):")
                         for peg_name, row in large_negative_changes.iterrows():

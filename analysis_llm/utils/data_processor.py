@@ -233,11 +233,52 @@ class DataProcessor:
             else:
                 self.logger.warning("processed_df에 change_pct 컬럼이 없습니다!")
 
-            change_map = processed_df.groupby("peg_name")["change_pct"].first().to_dict()
+            # change_map 생성 후 타입 검증 및 정제
+            change_map_raw = processed_df.groupby("peg_name")["change_pct"].first().to_dict()
             
-            # change_map 통계 확인 (디버깅)
+            # change_map 타입 검증: 문자열을 숫자로 변환
+            change_map = {}
+            invalid_count = 0
+            for peg_name, value in change_map_raw.items():
+                if value is None or pd.isna(value):
+                    change_map[peg_name] = None
+                elif isinstance(value, (int, float)):
+                    change_map[peg_name] = value
+                elif isinstance(value, str):
+                    try:
+                        change_map[peg_name] = float(value)
+                        self.logger.warning(
+                            "PEG '%s'의 change_pct가 문자열('%s')입니다. float로 변환했습니다.",
+                            peg_name, value
+                        )
+                    except (ValueError, TypeError):
+                        self.logger.error(
+                            "PEG '%s'의 change_pct('%s')를 숫자로 변환할 수 없습니다. None으로 처리합니다.",
+                            peg_name, value
+                        )
+                        change_map[peg_name] = None
+                        invalid_count += 1
+                else:
+                    self.logger.error(
+                        "PEG '%s'의 change_pct가 예상치 못한 타입(%s)입니다. None으로 처리합니다.",
+                        peg_name, type(value).__name__
+                    )
+                    change_map[peg_name] = None
+                    invalid_count += 1
+            
+            if invalid_count > 0:
+                self.logger.warning(
+                    "⚠️ change_map 생성 중 %d개의 잘못된 타입 발견 (None으로 처리됨)",
+                    invalid_count
+                )
+            
+            # change_map 통계 확인 (디버깅) - 타입 안전하게 비교
             if change_map:
-                non_zero_in_map = sum(1 for v in change_map.values() if v != 0 and v is not None)
+                # 숫자 타입이고 0이 아닌 값만 카운트
+                non_zero_in_map = sum(
+                    1 for v in change_map.values() 
+                    if v is not None and isinstance(v, (int, float)) and v != 0
+                )
                 sample_items = list(change_map.items())[:5]
                 self.logger.debug(
                     "change_map 생성: 총=%d개, 0이_아닌_값=%d개, 샘플=%s",
@@ -246,8 +287,11 @@ class DataProcessor:
                     sample_items
                 )
                 
-                # 큰 폭의 음수 변화율 검출
-                large_negative_changes = {k: v for k, v in change_map.items() if v is not None and v < -20}
+                # 큰 폭의 음수 변화율 검출 - 타입 안전하게 비교
+                large_negative_changes = {
+                    k: v for k, v in change_map.items() 
+                    if v is not None and isinstance(v, (int, float)) and v < -20
+                }
                 if large_negative_changes:
                     self.logger.warning(
                         "⚠️ change_map에서 큰 폭의 감소 감지: %d개 PEG (변화율 < -20%%)",
