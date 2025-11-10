@@ -405,16 +405,88 @@ class PEGProcessingService:
             pivot_df = combined_df.pivot_table(index=index_keys, columns="period", values="value", aggfunc='mean')
 
             if "N-1" in pivot_df.columns and "N" in pivot_df.columns:
-                # 다양한 케이스별 마스크 정의
-                zero_both_mask = (pivot_df["N-1"] == 0) & (pivot_df["N"] == 0)
-                zero_to_nonzero_mask = (pivot_df["N-1"] == 0) & (pivot_df["N"] != 0)
-                nonzero_to_zero_mask = (pivot_df["N-1"] != 0) & (pivot_df["N"] == 0)
+                # 🔧 데이터 타입 정규화: 숫자로 변환 (문자열 "N" 등을 NaN으로 처리)
+                pivot_df["N-1"] = pd.to_numeric(pivot_df["N-1"], errors='coerce')
+                pivot_df["N"] = pd.to_numeric(pivot_df["N"], errors='coerce')
                 
-                # 변화율 계산 가능한 PEG 식별 (N-1이 0이 아니고 N도 0이 아닌 경우)
-                valid_mask = (pivot_df["N-1"].notna()) & (pivot_df["N"].notna()) & (pivot_df["N-1"] != 0) & (pivot_df["N"] != 0)
+                # 숫자 변환 후 실제로 유효한 숫자 값인지 확인
+                valid_numeric_n1 = pivot_df["N-1"].notna()
+                valid_numeric_n = pivot_df["N"].notna()
+                
+                # 다양한 케이스별 마스크 정의 (유효한 숫자만 대상)
+                zero_both_mask = valid_numeric_n1 & valid_numeric_n & (pivot_df["N-1"] == 0) & (pivot_df["N"] == 0)
+                zero_to_nonzero_mask = valid_numeric_n1 & valid_numeric_n & (pivot_df["N-1"] == 0) & (pivot_df["N"] != 0)
+                nonzero_to_zero_mask = valid_numeric_n1 & valid_numeric_n & (pivot_df["N-1"] != 0) & (pivot_df["N"] == 0)
+                
+                # 변화율 계산 가능한 PEG 식별 (양쪽 모두 유효한 숫자이고, N-1과 N이 모두 0이 아닌 경우)
+                valid_mask = valid_numeric_n1 & valid_numeric_n & (pivot_df["N-1"] != 0) & (pivot_df["N"] != 0)
                 
                 # 초기화: 모든 change_pct를 NULL로 설정
                 pivot_df["change_pct"] = None
+                
+                # 📊 유효하지 않은 데이터 타입 감지 및 처리
+                invalid_n1_mask = ~valid_numeric_n1
+                invalid_n_mask = ~valid_numeric_n
+                
+                # 🔍 한쪽만 유효하지 않은 경우 (특별 처리 필요)
+                invalid_n1_only = invalid_n1_mask & valid_numeric_n
+                invalid_n_only = valid_numeric_n1 & invalid_n_mask
+                invalid_both = invalid_n1_mask & invalid_n_mask
+                
+                # N-1만 무효: N-1=NULL에서 N=값으로 나타난 경우 (신규 발생)
+                if invalid_n1_only.sum() > 0:
+                    logger.warning(
+                        f"⚠️ 신규 발생 패턴 감지: N-1=NULL에서 N=값으로 나타난 PEG {invalid_n1_only.sum()}개 "
+                        f"→ change_pct='WARN N-1=NULL,N!=NULL'로 설정하여 LLM에 전달"
+                    )
+                    pivot_df.loc[invalid_n1_only, "change_pct"] = "WARN N-1=NULL,N!=NULL"
+                    
+                    from config.logging_config import log_at_debug2
+                    invalid_pegs = pivot_df[invalid_n1_only].index.tolist()
+                    log_at_debug2(
+                        logger,
+                        f"🔍 N-1=NULL PEG 목록 ({len(invalid_pegs)}개): {invalid_pegs}"
+                    )
+                    for peg_name in invalid_pegs:
+                        row = pivot_df.loc[peg_name]
+                        log_at_debug2(
+                            logger,
+                            f"   PEG: {peg_name}, N-1: NULL (원본: 비숫자), N: {row['N']}"
+                        )
+                
+                # N만 무효: N-1=값에서 N=NULL로 사라진 경우 (소멸)
+                if invalid_n_only.sum() > 0:
+                    logger.warning(
+                        f"⚠️ 소멸 패턴 감지: N-1=값에서 N=NULL로 사라진 PEG {invalid_n_only.sum()}개 "
+                        f"→ change_pct='WARN N-1!=NULL,N=NULL'로 설정하여 LLM에 전달"
+                    )
+                    pivot_df.loc[invalid_n_only, "change_pct"] = "WARN N-1!=NULL,N=NULL"
+                    
+                    from config.logging_config import log_at_debug2
+                    invalid_pegs = pivot_df[invalid_n_only].index.tolist()
+                    log_at_debug2(
+                        logger,
+                        f"🔍 N=NULL PEG 목록 ({len(invalid_pegs)}개): {invalid_pegs}"
+                    )
+                    for peg_name in invalid_pegs:
+                        row = pivot_df.loc[peg_name]
+                        log_at_debug2(
+                            logger,
+                            f"   PEG: {peg_name}, N-1: {row['N-1']}, N: NULL (원본: 비숫자)"
+                        )
+                
+                # 양쪽 모두 무효: 완전히 제외 (change_pct=NULL로 남음)
+                if invalid_both.sum() > 0:
+                    logger.info(
+                        f"📊 토큰 최적화: N-1=NULL & N=NULL인 PEG {invalid_both.sum()}개 발견 "
+                        f"→ change_pct=NULL 처리 (프롬프트에서 제외됨)"
+                    )
+                    from config.logging_config import log_at_debug2
+                    invalid_pegs = pivot_df[invalid_both].index.tolist()
+                    log_at_debug2(
+                        logger,
+                        f"🔍 양쪽 모두 NULL PEG 목록 ({len(invalid_pegs)}개): {invalid_pegs}"
+                    )
                 
                 # 📊 통계 로깅 (INFO 레벨): 제외된 PEG 개수
                 if zero_both_mask.sum() > 0:
