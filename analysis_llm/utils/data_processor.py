@@ -314,8 +314,36 @@ class DataProcessor:
 
                 if n_minus_1_avg is not None and n_avg is not None:
                     absolute_change = n_avg - n_minus_1_avg  # 수정
-                    percentage_change = change_map.get(peg_name)
-                    if percentage_change is not None and pd.isna(percentage_change):
+                    
+                    # change_map에서 percentage_change 가져오기 (타입 검증 포함)
+                    percentage_change_raw = change_map.get(peg_name)
+                    
+                    # 타입 검증: None, NaN, 숫자가 아닌 경우 None으로 처리
+                    if percentage_change_raw is None or pd.isna(percentage_change_raw):
+                        percentage_change = None
+                    elif isinstance(percentage_change_raw, (int, float)):
+                        # 숫자 타입이면 그대로 사용
+                        percentage_change = percentage_change_raw
+                    elif isinstance(percentage_change_raw, str):
+                        # 문자열이면 숫자로 변환 시도
+                        try:
+                            percentage_change = float(percentage_change_raw)
+                            self.logger.warning(
+                                "PEG '%s'의 percentage_change가 문자열('%s')입니다. float로 변환했습니다.",
+                                peg_name, percentage_change_raw
+                            )
+                        except (ValueError, TypeError):
+                            self.logger.error(
+                                "PEG '%s'의 percentage_change('%s')를 숫자로 변환할 수 없습니다. None으로 처리합니다.",
+                                peg_name, percentage_change_raw
+                            )
+                            percentage_change = None
+                    else:
+                        # 예상치 못한 타입
+                        self.logger.error(
+                            "PEG '%s'의 percentage_change가 예상치 못한 타입(%s)입니다. None으로 처리합니다.",
+                            peg_name, type(percentage_change_raw).__name__
+                        )
                         percentage_change = None
                 else:
                     self.logger.warning(
@@ -387,8 +415,30 @@ class DataProcessor:
             complete_data_count = sum(1 for r in results if r.has_complete_data())
             incomplete_data_count = len(results) - complete_data_count
 
-            # 변화율 통계
-            valid_changes = [r.percentage_change for r in results if r.percentage_change is not None]
+            # 변화율 통계 (타입 검증 포함)
+            # percentage_change가 None이 아니고, 숫자 타입(int 또는 float)인 경우만 포함
+            valid_changes = [
+                r.percentage_change 
+                for r in results 
+                if r.percentage_change is not None and isinstance(r.percentage_change, (int, float))
+            ]
+            
+            # 문자열 타입의 percentage_change가 있는지 확인 (디버깅용)
+            invalid_changes = [
+                (r.peg_name, r.percentage_change, type(r.percentage_change).__name__)
+                for r in results 
+                if r.percentage_change is not None and not isinstance(r.percentage_change, (int, float))
+            ]
+            if invalid_changes:
+                self.logger.warning(
+                    "⚠️ 숫자가 아닌 percentage_change 발견: %d개 (통계에서 제외됨)",
+                    len(invalid_changes)
+                )
+                for peg_name, value, value_type in invalid_changes[:5]:  # 최대 5개만 출력
+                    self.logger.warning(
+                        "   PEG '%s': value='%s', type='%s'",
+                        peg_name, value, value_type
+                    )
 
             positive_changes = sum(1 for change in valid_changes if change > 0)
             negative_changes = sum(1 for change in valid_changes if change < 0)
