@@ -37,6 +37,7 @@ class AnalyzedPEGResult:
     
     필드명 규칙:
     - n_minus_1_avg, n_avg: 평균값 (avg는 통계 용어로 명확함)
+    - dimensions: 차원 정보 (예: "cNum=52,mcID=0,EstabCause=MO_DATA,QCI=9")
     - 향후 확장: n_minus_1_pct_95, n_minus_1_min, n_minus_1_max 등
     """
 
@@ -45,6 +46,7 @@ class AnalyzedPEGResult:
     n_avg: Optional[float]           # 수정: _value → _avg (평균값이므로)
     absolute_change: Optional[float]
     percentage_change: Optional[float]
+    dimensions: Optional[str] = None  # 추가: 차원 정보 (cNum, mcID, QCI 등)
     llm_analysis_summary: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -55,6 +57,7 @@ class AnalyzedPEGResult:
             "n_avg": self.n_avg,                   # 수정
             "absolute_change": self.absolute_change,
             "percentage_change": self.percentage_change,
+            "dimensions": self.dimensions,  # 추가
             "llm_analysis_summary": self.llm_analysis_summary,
         }
 
@@ -220,6 +223,43 @@ class DataProcessor:
 
             self.logger.info("1단계: 변화율 계산 및 구조화")
 
+            # dimensions 컬럼 존재 여부 확인
+            has_dimensions = 'dimensions' in processed_df.columns
+            
+            # QCI 필터링 (QCI 1, 5, 9만 유지)
+            if has_dimensions:
+                initial_count = len(processed_df)
+                
+                # QCI가 포함된 dimensions를 가진 행 식별
+                qci_mask = processed_df['dimensions'].notna() & processed_df['dimensions'].str.contains('QCI=', na=False)
+                
+                if qci_mask.sum() > 0:
+                    self.logger.info("🔍 QCI 필터링 시작: %d개 행에서 QCI 검출", qci_mask.sum())
+                    
+                    # QCI 1, 5, 9만 유지하는 마스크
+                    allowed_qci_pattern = r'QCI=(1|5|9)(?:,|$)'
+                    keep_mask = ~qci_mask | processed_df['dimensions'].str.contains(allowed_qci_pattern, regex=True, na=False)
+                    
+                    # 필터링 전후 통계
+                    filtered_out = (~keep_mask).sum()
+                    if filtered_out > 0:
+                        self.logger.info("🗑️ QCI 필터링: %d개 행 제거 (QCI ≠ 1,5,9)", filtered_out)
+                        
+                        # 제거된 QCI 값 샘플 출력 (디버깅용)
+                        removed_dims = processed_df[~keep_mask]['dimensions'].unique()[:5]
+                        self.logger.debug("   제거된 dimensions 샘플: %s", removed_dims.tolist())
+                    
+                    # 필터링 적용
+                    processed_df = processed_df[keep_mask].reset_index(drop=True)
+                    self.logger.info("✅ QCI 필터링 완료: %d → %d개 행", initial_count, len(processed_df))
+                else:
+                    self.logger.debug("QCI 차원이 포함된 데이터 없음 - 필터링 스킵")
+            
+            # 필터링 후 데이터 검증
+            if processed_df.empty:
+                self.logger.warning("⚠️ QCI 필터링 후 데이터가 비어있습니다!")
+                return []
+
             # processed_df의 change_pct 컬럼 확인 (디버깅)
             if "change_pct" in processed_df.columns:
                 unique_change_values = processed_df["change_pct"].unique()
@@ -234,36 +274,45 @@ class DataProcessor:
                 self.logger.warning("processed_df에 change_pct 컬럼이 없습니다!")
 
             # change_map 생성 후 타입 검증 및 정제
-            change_map_raw = processed_df.groupby("peg_name")["change_pct"].first().to_dict()
+            # dimensions가 있으면 (peg_name, dimensions) 튜플로 그룹화
+            if has_dimensions:
+                self.logger.info("✅ dimensions 컬럼 감지 - 차원별 PEG 유지")
+                change_map_raw = processed_df.groupby(["peg_name", "dimensions"])["change_pct"].first().to_dict()
+            else:
+                self.logger.warning("⚠️ dimensions 컬럼 없음 - peg_name만으로 그룹화")
+                change_map_raw = processed_df.groupby("peg_name")["change_pct"].first().to_dict()
             
             # change_map 타입 검증: 문자열을 숫자로 변환
             change_map = {}
             invalid_count = 0
-            for peg_name, value in change_map_raw.items():
+            for key, value in change_map_raw.items():
+                # key는 has_dimensions에 따라 str 또는 (str, str) 튜플
+                peg_display = f"{key[0]} (dims: {key[1]})" if has_dimensions else str(key)
+                
                 if value is None or pd.isna(value):
-                    change_map[peg_name] = None
+                    change_map[key] = None
                 elif isinstance(value, (int, float)):
-                    change_map[peg_name] = value
+                    change_map[key] = value
                 elif isinstance(value, str):
                     try:
-                        change_map[peg_name] = float(value)
+                        change_map[key] = float(value)
                         self.logger.warning(
                             "PEG '%s'의 change_pct가 문자열('%s')입니다. float로 변환했습니다.",
-                            peg_name, value
+                            peg_display, value
                         )
                     except (ValueError, TypeError):
                         self.logger.error(
                             "PEG '%s'의 change_pct('%s')를 숫자로 변환할 수 없습니다. None으로 처리합니다.",
-                            peg_name, value
+                            peg_display, value
                         )
-                        change_map[peg_name] = None
+                        change_map[key] = None
                         invalid_count += 1
                 else:
                     self.logger.error(
                         "PEG '%s'의 change_pct가 예상치 못한 타입(%s)입니다. None으로 처리합니다.",
-                        peg_name, type(value).__name__
+                        peg_display, type(value).__name__
                     )
-                    change_map[peg_name] = None
+                    change_map[key] = None
                     invalid_count += 1
             
             if invalid_count > 0:
@@ -297,14 +346,17 @@ class DataProcessor:
                         "⚠️ change_map에서 큰 폭의 감소 감지: %d개 PEG (변화율 < -20%%)",
                         len(large_negative_changes)
                     )
-                    for peg_name, change_pct in large_negative_changes.items():
-                        self.logger.warning(f"   {peg_name}: {change_pct:.2f}%")
+                    for key, change_pct in large_negative_changes.items():
+                        # key는 has_dimensions에 따라 str 또는 (str, str) 튜플
+                        peg_display = f"{key[0]} (dims: {key[1]})" if has_dimensions else str(key)
+                        self.logger.warning(f"   {peg_display}: {change_pct:.2f}%")
             else:
                 self.logger.warning("change_map이 비어있습니다!")
 
             # 중복 데이터 감지 및 로깅 (pivot 실패 방지)
             self.logger.debug("pivot 실행 전 중복 데이터 검사 시작")
-            duplicates = processed_df[processed_df.duplicated(subset=['peg_name', 'period', 'avg_value'], keep=False)]
+            subset_cols = ['peg_name', 'dimensions', 'period', 'avg_value'] if has_dimensions else ['peg_name', 'period', 'avg_value']
+            duplicates = processed_df[processed_df.duplicated(subset=subset_cols, keep=False)]
             
             if not duplicates.empty:
                 unique_peg_count = duplicates['peg_name'].nunique()
@@ -318,19 +370,21 @@ class DataProcessor:
                     for _, row in dup_rows.iterrows():
                         period = row.get('period', 'N/A')
                         avg_value = row.get('avg_value', 'N/A')
-                        self.logger.error(f"       period={period}, avg_value={avg_value}")
+                        dims = row.get('dimensions', 'N/A') if has_dimensions else 'N/A'
+                        self.logger.error(f"       period={period}, avg_value={avg_value}, dimensions={dims}")
                 
                 if unique_peg_count > 5:
                     self.logger.error(f"   ... 외 {unique_peg_count - 5}개 PEG 더 있음")
             else:
                 self.logger.debug("✓ 중복 데이터 없음 (pivot 안전)")
 
-            # pivot_table 사용 (중복 시에도 안전하게 처리)
-            self.logger.debug("pivot_table 실행: index=peg_name, columns=period, aggfunc=first")
+            # pivot_table 사용 (dimensions 포함 여부에 따라 분기)
+            index_cols = ["peg_name", "dimensions"] if has_dimensions else "peg_name"
+            self.logger.info(f"pivot_table 실행: index={index_cols}, columns=period, aggfunc=first")
             try:
                 pivot_df = (
                     processed_df.pivot_table(
-                        index="peg_name",
+                        index=index_cols,
                         columns="period",
                         values="avg_value",
                         aggfunc='first',  # 중복 시 첫 번째 값 사용
@@ -338,7 +392,7 @@ class DataProcessor:
                     )
                     .rename(columns={"N-1": "n_minus_1", "N": "n"})
                 )
-                self.logger.debug("pivot_table 완료: %d개 PEG", len(pivot_df))
+                self.logger.info("✅ pivot_table 완료: %d개 행 (차원 포함 시 PEG×dimensions 조합)", len(pivot_df))
             except Exception as pivot_error:
                 self.logger.error("pivot_table 실행 중 오류 발생: %s", pivot_error)
                 self.logger.error("processed_df 정보: shape=%s, columns=%s", 
@@ -349,7 +403,18 @@ class DataProcessor:
 
             results: List[AnalyzedPEGResult] = []
 
-            for peg_name, row in pivot_df.iterrows():
+            for index_key, row in pivot_df.iterrows():
+                # index_key는 dimensions 포함 시 (peg_name, dimensions) 튜플, 아니면 peg_name 문자열
+                if has_dimensions:
+                    peg_name, dimensions = index_key
+                    peg_display = f"{peg_name} (dims: {dimensions})"
+                    change_key = (peg_name, dimensions)
+                else:
+                    peg_name = index_key
+                    dimensions = None
+                    peg_display = peg_name
+                    change_key = peg_name
+                
                 n_minus_1_avg = row.get("n_minus_1")  # 수정: _value → _avg
                 n_avg = row.get("n")                   # 수정: _value → _avg
 
@@ -360,7 +425,7 @@ class DataProcessor:
                     absolute_change = n_avg - n_minus_1_avg  # 수정
                     
                     # change_map에서 percentage_change 가져오기 (타입 검증 포함)
-                    percentage_change_raw = change_map.get(peg_name)
+                    percentage_change_raw = change_map.get(change_key)
                     
                     # 타입 검증: None, NaN, 숫자가 아닌 경우 None으로 처리
                     if percentage_change_raw is None or pd.isna(percentage_change_raw):
@@ -374,24 +439,24 @@ class DataProcessor:
                             percentage_change = float(percentage_change_raw)
                             self.logger.warning(
                                 "PEG '%s'의 percentage_change가 문자열('%s')입니다. float로 변환했습니다.",
-                                peg_name, percentage_change_raw
+                                peg_display, percentage_change_raw
                             )
                         except (ValueError, TypeError):
                             self.logger.error(
                                 "PEG '%s'의 percentage_change('%s')를 숫자로 변환할 수 없습니다. None으로 처리합니다.",
-                                peg_name, percentage_change_raw
+                                peg_display, percentage_change_raw
                             )
                             percentage_change = None
                     else:
                         # 예상치 못한 타입
                         self.logger.error(
                             "PEG '%s'의 percentage_change가 예상치 못한 타입(%s)입니다. None으로 처리합니다.",
-                            peg_name, type(percentage_change_raw).__name__
+                            peg_display, type(percentage_change_raw).__name__
                         )
                         percentage_change = None
                 else:
                     self.logger.warning(
-                        "PEG '%s' 데이터 불완전 (N-1=%s, N=%s)", peg_name, n_minus_1_avg, n_avg  # 수정
+                        "PEG '%s' 데이터 불완전 (N-1=%s, N=%s)", peg_display, n_minus_1_avg, n_avg  # 수정
                     )
 
                 results.append(
@@ -401,10 +466,12 @@ class DataProcessor:
                         n_avg=n_avg,                   # 수정
                         absolute_change=absolute_change,
                         percentage_change=percentage_change,
+                        dimensions=dimensions,  # 추가
                     )
                 )
 
-            results.sort(key=lambda x: x.peg_name)
+            # 정렬: peg_name 기준, dimensions가 있으면 그것도 2차 정렬
+            results.sort(key=lambda x: (x.peg_name, x.dimensions or ""))
 
             self.logger.info("2단계: LLM 분석 통합")
             llm_peg_analysis: Dict[str, str] = {}
