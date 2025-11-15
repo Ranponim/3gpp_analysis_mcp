@@ -27,6 +27,34 @@ from ..repositories import LLMClient, LLMRepository
 logger = logging.getLogger(__name__)
 
 
+def _get_prompt_preview_max_length() -> int:
+    """
+    프롬프트 로그 미리보기 최대 길이를 환경변수에서 동적으로 가져옵니다.
+    
+    우선순위:
+    1. PROMPT_LOG_PREVIEW_MAX_LENGTH
+    2. LOG_MAX_LENGTH
+    3. 기본값 1000
+    
+    0 이하 값이 설정되면 길이 제한을 해제합니다.
+    """
+    base_default = os.getenv("LOG_MAX_LENGTH", "1000")
+    target_value = os.getenv("PROMPT_LOG_PREVIEW_MAX_LENGTH", base_default)
+    
+    try:
+        return int(target_value)
+    except ValueError:
+        logger.warning(
+            "PROMPT_LOG_PREVIEW_MAX_LENGTH 값이 유효하지 않아 기본값을 사용합니다: %s", target_value
+        )
+        try:
+            return int(base_default)
+        except ValueError:
+            # LOG_MAX_LENGTH도 잘못된 경우를 대비해 안전한 기본값 사용
+            logger.warning("LOG_MAX_LENGTH 값도 유효하지 않아 1000을 사용합니다: %s", base_default)
+            return 1000
+
+
 class LLMAnalysisError(ServiceError):
     """
     LLM 분석 관련 오류 예외 클래스
@@ -466,13 +494,15 @@ class LLMAnalysisService:
             prompt = strategy.build_prompt(processed_df, n1_range, n_range, **kwargs)
             
             # 프롬프트 상세 로깅 (DEBUG2 레벨)
-            # 환경변수에 따라 더 긴 프롬프트를 로그에 남길 수 있음
-            import os
-            log_max_length = int(os.getenv('LOG_MAX_LENGTH', '1000'))
+            # 환경변수에 따라 프롬프트 미리보기 길이를 조정할 수 있음
+            log_max_length = _get_prompt_preview_max_length()
             
-            # 프롬프트 미리보기 생성
-            if len(prompt) > log_max_length:
-                prompt_preview = prompt[:log_max_length] + f"\n... (총 {len(prompt)}자, {log_max_length}자까지만 표시)"
+            # 프롬프트 미리보기 생성 (0 이하 값이면 전체 출력)
+            if log_max_length > 0 and len(prompt) > log_max_length:
+                prompt_preview = (
+                    prompt[:log_max_length]
+                    + f"\n... (총 {len(prompt)}자, {log_max_length}자까지만 표시)"
+                )
             else:
                 prompt_preview = prompt
             

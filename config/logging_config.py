@@ -26,6 +26,9 @@ Usage:
 - LOG_MAX_LENGTH: 로그 출력 최대 길이 (기본값: 1000)
     프롬프트 등 긴 데이터를 로그에 출력할 때 최대 길이를 제한합니다.
     매우 긴 내용을 로그에 남기고 싶다면 이 값을 크게 설정하세요.
+- DATA_FLOW_LOG_MAX_LENGTH: log_data_flow() 호출 시 사용할 최대 길이
+    설정하지 않으면 LOG_MAX_LENGTH를 그대로 사용합니다.
+    0 이하로 지정하면 데이터 길이를 제한하지 않습니다.
 """
 
 import logging
@@ -44,6 +47,26 @@ def _get_log_max_length() -> int:
         int: LOG_MAX_LENGTH 환경변수 값 (기본값: 1000)
     """
     return int(os.getenv('LOG_MAX_LENGTH', '1000'))
+
+
+def _get_data_flow_log_max_length() -> Optional[int]:
+    """
+    데이터 흐름 로깅 전용 최대 길이를 환경변수에서 읽어 반환
+    
+    Returns:
+        Optional[int]: DATA_FLOW_LOG_MAX_LENGTH 값, 미설정 시 None
+    """
+    value = os.getenv('DATA_FLOW_LOG_MAX_LENGTH')
+    if value is None:
+        return None
+    
+    try:
+        return int(value)
+    except ValueError:
+        logging.warning(
+            "DATA_FLOW_LOG_MAX_LENGTH 값이 유효하지 않아 무시합니다: %s (정수 필요)", value
+        )
+        return None
 
 
 def setup_custom_logging_levels():
@@ -151,7 +174,13 @@ def format_data_for_log(data, max_length: Optional[int] = None, indent: int = 2)
         return f"<포맷팅 오류: {e}>"
 
 
-def log_data_flow(logger: logging.Logger, stage: str, data, level: str = 'DEBUG2'):
+def log_data_flow(
+    logger: logging.Logger,
+    stage: str,
+    data,
+    level: str = 'DEBUG2',
+    max_length: Optional[int] = None,
+):
     """
     데이터 흐름을 로그로 기록하는 헬퍼 함수
     
@@ -160,12 +189,19 @@ def log_data_flow(logger: logging.Logger, stage: str, data, level: str = 'DEBUG2
         stage: 처리 단계 이름 (예: "DB 조회", "데이터 변환")
         data: 기록할 데이터
         level: 로그 레벨 (기본: DEBUG2)
+        max_length: 출력 길이 제한 (None이면 환경변수 사용)
     """
     level_num = get_numeric_log_level(level)
     
     if logger.isEnabledFor(level_num):
         separator = "=" * 80
-        formatted_data = format_data_for_log(data)
+        
+        # max_length가 지정되지 않았다면 DATA_FLOW_LOG_MAX_LENGTH 우선 적용
+        effective_max_length = max_length
+        if effective_max_length is None:
+            effective_max_length = _get_data_flow_log_max_length()
+        
+        formatted_data = format_data_for_log(data, max_length=effective_max_length)
         
         message = f"\n{separator}\n📊 [{stage}] 데이터\n{separator}\n{formatted_data}\n{separator}"
         logger.log(level_num, message)
