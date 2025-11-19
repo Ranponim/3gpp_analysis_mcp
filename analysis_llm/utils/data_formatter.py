@@ -102,6 +102,61 @@ def format_dataframe_for_prompt(
         else:
             logging.debug("필터링 대상 없음 (모든 PEG가 유효한 변화율 보유)")
     
+    # [LLM 최적화] Long Format -> Wide Format 변환 (1번 요청 반영)
+    # period 컬럼이 있고 avg_value가 있으면 Wide Format으로 피벗팅
+    if 'period' in df.columns and 'avg_value' in df.columns:
+        logging.info("Long Format 감지: Wide Format으로 변환하여 LLM 이해도 향상 및 토큰 절약")
+        try:
+            # 피벗팅을 위한 인덱스 컬럼 설정
+            index_cols = [col for col in ['peg_name', 'dimensions', 'ne'] if col in df.columns]
+            
+            if index_cols:
+                # 피벗 실행
+                pivot_df = df.pivot_table(
+                    index=index_cols,
+                    columns='period',
+                    values='avg_value',
+                    aggfunc='first'
+                ).reset_index()
+                
+                # 컬럼 이름 정리 (N-1, N)
+                if 'N-1' in pivot_df.columns:
+                    pivot_df.rename(columns={'N-1': 'N-1_Value'}, inplace=True)
+                if 'N' in pivot_df.columns:
+                    pivot_df.rename(columns={'N': 'N_Value'}, inplace=True)
+                
+                # Change(%) 정보 추가
+                if 'change_pct' in df.columns:
+                    change_df = df[index_cols + ['change_pct']].drop_duplicates(subset=index_cols)
+                    pivot_df = pd.merge(pivot_df, change_df, on=index_cols, how='left')
+                    pivot_df.rename(columns={'change_pct': 'Change(%)'}, inplace=True)
+                
+                # 컬럼 매핑
+                col_mapping = {
+                    'peg_name': 'PEG',
+                    'dimensions': 'Dimension',
+                    'ne': 'NE'
+                }
+                pivot_df.rename(columns=col_mapping, inplace=True)
+                
+                # 최종 컬럼 선택
+                final_cols = []
+                if 'PEG' in pivot_df.columns: final_cols.append('PEG')
+                if 'Dimension' in pivot_df.columns: final_cols.append('Dimension')
+                if 'NE' in pivot_df.columns: final_cols.append('NE')
+                if 'N-1_Value' in pivot_df.columns: final_cols.append('N-1_Value')
+                if 'N_Value' in pivot_df.columns: final_cols.append('N_Value')
+                if 'Change(%)' in pivot_df.columns: final_cols.append('Change(%)')
+                
+                df = pivot_df[final_cols]
+                logging.info(f"Wide Format 변환 완료: {len(df)}행 (Columns: {final_cols})")
+                
+            else:
+                logging.warning("인덱스 컬럼을 찾을 수 없어 Wide Format 변환 건너뜀")
+                
+        except Exception as e:
+            logging.error(f"Wide Format 변환 중 오류 발생: {e}. 원본 포맷 사용.")
+
     # 기본 우선 컬럼 설정
     # PEG 분석에 필요한 실제 컬럼명들
     if preferred_columns is None:
@@ -114,13 +169,13 @@ def format_dataframe_for_prompt(
         selected_columns = available_preferred_cols
         logging.info(f"우선 컬럼 사용: {selected_columns}")
     else:
-        # 우선 컬럼이 없으면 모든 컬럼 사용
+        # 우선 컬럼이 없으면 모든 컬럼 사용 (Wide Format 변환 시 이 경로를 타게 됨)
         selected_columns = list(df.columns)
         logging.info(f"대체 컬럼 사용 (전체 컬럼): {selected_columns}")
     
     # 컬럼 필터링된 DataFrame 생성
     filtered_df = df[selected_columns]
-    
+
     # 행 수 제한 적용 (max_rows가 명시적으로 지정된 경우에만 제한)
     if max_rows is not None and max_rows > 0:
         # 명시적으로 행 수 제한이 요청된 경우에만 적용

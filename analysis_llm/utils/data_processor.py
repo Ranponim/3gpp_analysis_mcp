@@ -149,6 +149,46 @@ class DataProcessor:
             "output_model": "AnalyzedPEGResult",
         }
 
+    def _clean_dimensions(self, dim_str: Optional[str]) -> Optional[str]:
+        """
+        Dimensions 문자열에서 핵심 정보(CellIdentity, QCI)만 추출하여 정제
+        
+        Args:
+            dim_str: 원본 dimensions 문자열 (예: "CellIdentity=10,PLMN=0,gnb_ID=0,QCI=1")
+            
+        Returns:
+            정제된 dimensions 문자열 (예: "CellIdentity=10,QCI=1")
+        """
+        if not dim_str or not isinstance(dim_str, str):
+            return dim_str
+            
+        try:
+            # 1. 딕셔너리로 파싱
+            parts = dim_str.split(',')
+            dim_dict = {}
+            for part in parts:
+                if '=' in part:
+                    k, v = part.split('=', 1)
+                    dim_dict[k.strip()] = v.strip()
+            
+            # 2. 필요한 키만 추출 (우선순위: CellIdentity, QCI)
+            target_keys = ['CellIdentity', 'QCI']
+            clean_parts = []
+            
+            for key in target_keys:
+                if key in dim_dict:
+                    clean_parts.append(f"{key}={dim_dict[key]}")
+            
+            # 추출된 키가 있으면 반환, 없으면 원본 반환 (데이터 유실 최소화)
+            if clean_parts:
+                return ','.join(clean_parts)
+            
+            return dim_str
+                
+        except Exception:
+            # 파싱 오류 시 원본 반환
+            return dim_str
+
     def _integrate_llm_analysis(
         self, peg_results: List[AnalyzedPEGResult], llm_analysis_results: Optional[Dict[str, str]] = None
     ) -> List[AnalyzedPEGResult]:
@@ -259,6 +299,15 @@ class DataProcessor:
             if processed_df.empty:
                 self.logger.warning("⚠️ QCI 필터링 후 데이터가 비어있습니다!")
                 return []
+
+            # [추가] Dimensions 정제 (CellIdentity, QCI만 남김)
+            if has_dimensions:
+                self.logger.info("🧹 Dimensions 정제 시작: CellIdentity, QCI 정보만 추출")
+                processed_df['dimensions'] = processed_df['dimensions'].apply(self._clean_dimensions)
+                
+                # 정제된 결과 샘플 로깅
+                unique_dims = processed_df['dimensions'].unique()[:3]
+                self.logger.debug("   정제된 dimensions 샘플: %s", unique_dims.tolist())
 
             # processed_df의 change_pct 컬럼 확인 (디버깅)
             if "change_pct" in processed_df.columns:
