@@ -41,5 +41,6 @@ __pycache__/
 #test code
 test_*
 *.txt
+/tests
 #md files
 *.md

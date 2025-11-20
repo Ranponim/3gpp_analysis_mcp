@@ -423,6 +423,9 @@ class PEGProcessingService:
                 
                 # 초기화: 모든 change_pct를 NULL로 설정
                 pivot_df["change_pct"] = None
+                # 🔧 [수정] 신규/소멸 플래그 초기화
+                pivot_df["is_new"] = False
+                pivot_df["is_gone"] = False
                 
                 # 📊 유효하지 않은 데이터 타입 감지 및 처리
                 invalid_n1_mask = ~valid_numeric_n1
@@ -437,10 +440,11 @@ class PEGProcessingService:
                 if invalid_n1_only.sum() > 0:
                     logger.warning(
                         f"⚠️ 신규 발생 패턴 감지: N-1=NULL에서 N=값으로 나타난 PEG {invalid_n1_only.sum()}개 "
-                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
+                        f"→ change_pct=NULL, is_new=True 설정"
                     )
                     # 타입 안전성을 위해 None 저장 (문자열 대신)
                     pivot_df.loc[invalid_n1_only, "change_pct"] = None
+                    pivot_df.loc[invalid_n1_only, "is_new"] = True
                     
                     from config.logging_config import log_at_debug2
                     invalid_pegs = pivot_df[invalid_n1_only].index.tolist()
@@ -459,10 +463,11 @@ class PEGProcessingService:
                 if invalid_n_only.sum() > 0:
                     logger.warning(
                         f"⚠️ 소멸 패턴 감지: N-1=값에서 N=NULL로 사라진 PEG {invalid_n_only.sum()}개 "
-                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
+                        f"→ change_pct=-100.0, is_gone=True 설정"
                     )
-                    # 타입 안전성을 위해 None 저장 (문자열 대신)
-                    pivot_df.loc[invalid_n_only, "change_pct"] = None
+                    # 소멸은 -100%로 처리
+                    pivot_df.loc[invalid_n_only, "change_pct"] = -100.0
+                    pivot_df.loc[invalid_n_only, "is_gone"] = True
                     
                     from config.logging_config import log_at_debug2
                     invalid_pegs = pivot_df[invalid_n_only].index.tolist()
@@ -509,10 +514,11 @@ class PEGProcessingService:
                 if zero_to_nonzero_mask.sum() > 0:
                     logger.warning(
                         f"⚠️ 급증 패턴 감지: N-1=0에서 N≠0으로 증가한 PEG {zero_to_nonzero_mask.sum()}개 "
-                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
+                        f"→ change_pct=NULL, is_new=True 설정"
                     )
                     # 타입 안전성을 위해 None 저장 (문자열 대신)
                     pivot_df.loc[zero_to_nonzero_mask, "change_pct"] = None
+                    pivot_df.loc[zero_to_nonzero_mask, "is_new"] = True
                     
                     # 🔍 상세 로깅
                     from config.logging_config import log_at_debug2
@@ -531,10 +537,11 @@ class PEGProcessingService:
                 if nonzero_to_zero_mask.sum() > 0:
                     logger.warning(
                         f"⚠️ 급감 패턴 감지: N-1≠0에서 N=0으로 감소한 PEG {nonzero_to_zero_mask.sum()}개 "
-                        f"→ change_pct=NULL 처리 (경고는 로그에만 기록)"
+                        f"→ change_pct=-100.0, is_gone=True 설정"
                     )
-                    # 타입 안전성을 위해 None 저장 (문자열 대신)
-                    pivot_df.loc[nonzero_to_zero_mask, "change_pct"] = None
+                    # 소멸은 -100%로 처리
+                    pivot_df.loc[nonzero_to_zero_mask, "change_pct"] = -100.0
+                    pivot_df.loc[nonzero_to_zero_mask, "is_gone"] = True
                     
                     # 🔍 상세 로깅
                     from config.logging_config import log_at_debug2
@@ -586,10 +593,13 @@ class PEGProcessingService:
                             logger.warning(f"      해석: 값이 {abs(change_val):.1f}% 감소했습니다")
             else:
                 pivot_df["change_pct"] = 0
+                pivot_df["is_new"] = False
+                pivot_df["is_gone"] = False
 
             # 최종 형태로 변환
             processed_df = pivot_df.reset_index()
-            id_vars = [key for key in index_keys] + ["change_pct"]
+            # [수정] is_new, is_gone을 id_vars에 추가하여 보존
+            id_vars = [key for key in index_keys] + ["change_pct", "is_new", "is_gone"]
             value_vars = [col for col in ["N-1", "N"] if col in processed_df.columns]
             processed_df = processed_df.melt(
                 id_vars=id_vars,

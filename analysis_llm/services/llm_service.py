@@ -169,14 +169,24 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         original_peg_count = len(processed_df["peg_name"].unique())
         
         if "change_pct" in processed_df.columns:
-            # change_pct가 NULL이 아닌 행들만 필터링
-            filtered_df = processed_df[pd.notna(processed_df["change_pct"])].copy()
+            # change_pct가 NULL이 아니거나, 신규(is_new)/소멸(is_gone)인 행들만 필터링
+            condition = pd.notna(processed_df["change_pct"])
+            
+            # is_new 컬럼이 있으면 조건에 추가
+            if "is_new" in processed_df.columns:
+                condition |= processed_df["is_new"]
+                
+            # is_gone 컬럼이 있으면 조건에 추가
+            if "is_gone" in processed_df.columns:
+                condition |= processed_df["is_gone"]
+            
+            filtered_df = processed_df[condition].copy()
             filtered_peg_count = len(filtered_df["peg_name"].unique())
             excluded_peg_count = original_peg_count - filtered_peg_count
             
             if excluded_peg_count > 0:
                 logger.info(
-                    f"🔍 토큰 최적화: change_pct=NULL인 PEG {excluded_peg_count}개 제외 "
+                    f"🔍 토큰 최적화: 의미 없는(change_pct=NULL) PEG {excluded_peg_count}개 제외 "
                     f"(전체 {original_peg_count}개 → 프롬프트 {filtered_peg_count}개)"
                 )
                 
@@ -191,7 +201,7 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
                 # 필터링된 데이터 사용
                 processed_df = filtered_df
             else:
-                logger.info("🔍 토큰 최적화: 제외할 PEG 없음 (모든 PEG의 change_pct가 유효함)")
+                logger.info("🔍 토큰 최적화: 제외할 PEG 없음 (모든 PEG가 유효하거나 NEW/GONE임)")
         else:
             logger.warning("🔍 토큰 최적화: change_pct 컬럼이 없어 필터링을 수행할 수 없습니다")
 
@@ -205,6 +215,14 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
         # 데이터 포맷팅 - 모든 PEG 포함 (데이터 유실 방지)
         # LLM이 cell별 성능을 구분할 수 있도록 cellid 정보 추가
         preview_df = processed_df.copy()
+        
+        # [NEW] is_new/is_gone 포맷팅 (NEW, GONE 문자열로 변환)
+        if "is_new" in preview_df.columns:
+             # boolean indexing으로 값 변경
+             preview_df.loc[preview_df["is_new"] == True, "change_pct"] = "NEW"
+        
+        if "is_gone" in preview_df.columns:
+             preview_df.loc[preview_df["is_gone"] == True, "change_pct"] = "GONE"
         
         # dimensions에서 CellIdentity만 추출하여 별도 컬럼 추가 (토큰 절약)
         if 'dimensions' in preview_df.columns:
