@@ -40,6 +40,6 @@ __pycache__/
 
 #test code
 test_*
-
+*.txt
 #md files
 *.md
