@@ -559,18 +559,44 @@ class PEGProcessingService:
                 # 정상 케이스: 변화율 계산 (N-1이 0이 아닌 경우만)
                 if valid_mask.sum() > 0:
                     # 변화율 계산 전 음수 값 검증
+                    # [수정] 음수 값이 허용되는 PEG 패턴 정의 (dBm, dB, RSRP, RSRQ, Sinr 등)
+                    safe_negative_patterns = ["dBm", "dB", "RSRP", "RSRQ", "Sinr", "Power", "Gain"]
+                    
+                    # N-1 기간 음수 검증
                     negative_n1_mask = (pivot_df["N-1"] < 0)
-                    negative_n_mask = (pivot_df["N"] < 0)
-                    
                     if negative_n1_mask.sum() > 0:
-                        logger.error("❌ N-1 기간에 음수 값이 발견되었습니다:")
+                        # 음수 값 중 허용되지 않는 패턴만 필터링
+                        suspicious_pegs = []
                         for peg_name, value in pivot_df.loc[negative_n1_mask, "N-1"].items():
-                            logger.error(f"   PEG: {peg_name}, N-1 값: {value}")
-                    
+                            # peg_name이 튜플인 경우 (index가 MultiIndex일 때)
+                            name_str = str(peg_name[0]) if isinstance(peg_name, tuple) else str(peg_name)
+                            
+                            is_safe = any(pattern.lower() in name_str.lower() for pattern in safe_negative_patterns)
+                            if not is_safe:
+                                suspicious_pegs.append((peg_name, value))
+                        
+                        if suspicious_pegs:
+                            logger.error("❌ N-1 기간에 허용되지 않는 음수 값이 발견되었습니다:")
+                            for peg_name, value in suspicious_pegs:
+                                logger.error(f"   PEG: {peg_name}, N-1 값: {value}")
+
+                    # N 기간 음수 검증
+                    negative_n_mask = (pivot_df["N"] < 0)
                     if negative_n_mask.sum() > 0:
-                        logger.error("❌ N 기간에 음수 값이 발견되었습니다:")
+                        # 음수 값 중 허용되지 않는 패턴만 필터링
+                        suspicious_pegs = []
                         for peg_name, value in pivot_df.loc[negative_n_mask, "N"].items():
-                            logger.error(f"   PEG: {peg_name}, N 값: {value}")
+                            # peg_name이 튜플인 경우
+                            name_str = str(peg_name[0]) if isinstance(peg_name, tuple) else str(peg_name)
+                            
+                            is_safe = any(pattern.lower() in name_str.lower() for pattern in safe_negative_patterns)
+                            if not is_safe:
+                                suspicious_pegs.append((peg_name, value))
+                        
+                        if suspicious_pegs:
+                            logger.error("❌ N 기간에 허용되지 않는 음수 값이 발견되었습니다:")
+                            for peg_name, value in suspicious_pegs:
+                                logger.error(f"   PEG: {peg_name}, N 값: {value}")
                     
                     # 변화율 계산
                     pivot_df.loc[valid_mask, "change_pct"] = ((pivot_df.loc[valid_mask, "N"] - pivot_df.loc[valid_mask, "N-1"]) / pivot_df.loc[valid_mask, "N-1"] * 100)
