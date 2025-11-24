@@ -239,6 +239,10 @@ class EnhancedAnalysisPromptStrategy(BasePromptStrategy):
             preview_cols = list(preview_df.columns)[:6]
         
         preview_df = preview_df[preview_cols]  # 모든 데이터 포함
+        
+        # [DEBUG] 프롬프트 생성 전 데이터 구조 로깅 (사용자 요청)
+        logger.info("🔍 [PROMPT PREVIEW] 프롬프트 추가 전 데이터 구조 (상위 20행):\n%s", preview_df.head(20).to_string())
+        
         logger.info("프롬프트 데이터 준비: 전체 %d행, %d컬럼 포함 (cell 정보 포함)", len(preview_df), len(preview_cols))
         data_preview = self.format_dataframe_for_prompt(preview_df)
 

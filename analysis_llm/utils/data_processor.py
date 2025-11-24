@@ -171,8 +171,8 @@ class DataProcessor:
                     k, v = part.split('=', 1)
                     dim_dict[k.strip()] = v.strip()
             
-            # 2. 필요한 키만 추출 (우선순위: CellIdentity, QCI)
-            target_keys = ['CellIdentity', 'QCI']
+            # 2. 필요한 키만 추출 (우선순위: CellIdentity, QCI, 5QI)
+            target_keys = ['CellIdentity', 'QCI', '5QI']
             clean_parts = []
             
             for key in target_keys:
@@ -266,43 +266,43 @@ class DataProcessor:
             # dimensions 컬럼 존재 여부 확인
             has_dimensions = 'dimensions' in processed_df.columns
             
-            # QCI 필터링 (QCI 1, 5, 9만 유지)
+            # QCI/5QI 필터링 (1, 5, 9만 유지)
             if has_dimensions:
                 initial_count = len(processed_df)
                 
-                # QCI가 포함된 dimensions를 가진 행 식별
-                qci_mask = processed_df['dimensions'].notna() & processed_df['dimensions'].str.contains('QCI=', na=False)
+                # QCI 또는 5QI가 포함된 dimensions를 가진 행 식별
+                qci_mask = processed_df['dimensions'].notna() & processed_df['dimensions'].str.contains(r'(?:QCI|5QI)=', regex=True, na=False)
                 
                 if qci_mask.sum() > 0:
-                    self.logger.info("🔍 QCI 필터링 시작: %d개 행에서 QCI 검출", qci_mask.sum())
+                    self.logger.info("🔍 QCI/5QI 필터링 시작: %d개 행에서 QCI/5QI 검출", qci_mask.sum())
                     
-                    # QCI 1, 5, 9만 유지하는 마스크
-                    allowed_qci_pattern = r'QCI=(1|5|9)(?:,|$)'
-                    keep_mask = ~qci_mask | processed_df['dimensions'].str.contains(allowed_qci_pattern, regex=True, na=False)
+                    # QCI/5QI 1, 5, 9만 유지하는 마스크
+                    allowed_pattern = r'(?:QCI|5QI)=(1|5|9)(?:,|$)'
+                    keep_mask = ~qci_mask | processed_df['dimensions'].str.contains(allowed_pattern, regex=True, na=False)
                     
                     # 필터링 전후 통계
                     filtered_out = (~keep_mask).sum()
                     if filtered_out > 0:
-                        self.logger.info("🗑️ QCI 필터링: %d개 행 제거 (QCI ≠ 1,5,9)", filtered_out)
+                        self.logger.info("🗑️ QCI/5QI 필터링: %d개 행 제거 (값 ≠ 1,5,9)", filtered_out)
                         
-                        # 제거된 QCI 값 샘플 출력 (디버깅용)
+                        # 제거된 값 샘플 출력 (디버깅용)
                         removed_dims = processed_df[~keep_mask]['dimensions'].unique()[:5]
                         self.logger.debug("   제거된 dimensions 샘플: %s", removed_dims.tolist())
                     
                     # 필터링 적용
                     processed_df = processed_df[keep_mask].reset_index(drop=True)
-                    self.logger.info("✅ QCI 필터링 완료: %d → %d개 행", initial_count, len(processed_df))
+                    self.logger.info("✅ QCI/5QI 필터링 완료: %d → %d개 행", initial_count, len(processed_df))
                 else:
-                    self.logger.debug("QCI 차원이 포함된 데이터 없음 - 필터링 스킵")
+                    self.logger.debug("QCI/5QI 차원이 포함된 데이터 없음 - 필터링 스킵")
             
             # 필터링 후 데이터 검증
             if processed_df.empty:
                 self.logger.warning("⚠️ QCI 필터링 후 데이터가 비어있습니다!")
                 return []
 
-            # [추가] Dimensions 정제 (CellIdentity, QCI만 남김)
+            # [추가] Dimensions 정제 (CellIdentity, QCI, 5QI만 남김)
             if has_dimensions:
-                self.logger.info("🧹 Dimensions 정제 시작: CellIdentity, QCI 정보만 추출")
+                self.logger.info("🧹 Dimensions 정제 시작: CellIdentity, QCI, 5QI 정보만 추출")
                 processed_df['dimensions'] = processed_df['dimensions'].apply(self._clean_dimensions)
                 
                 # 정제된 결과 샘플 로깅
